@@ -283,7 +283,8 @@ canvas:focus{outline:none}
 <script src="index.js"></script>
 <script>
 // CDN constant is now set to current directory
-const CDN = './';
+const CDN = 'https://cdn.jsdelivr.net/gh/UnnamedGames352/Brotato@main/';
+const LOCAL = './';
 const MB  = 1048576;
 const fmt = b => (b / MB).toFixed(1);
 
@@ -413,7 +414,7 @@ async function fetchParts(key, filename, count, padded, totalBytes) {
     const engine = new Engine(GODOT_CONFIG);
 
     await engine.startGame({
-      executable: CDN + 'index',   /* Local index.worker.js */
+      executable: LOCAL + 'index',   /* Local index.worker.js */
       mainPack:   pckUrl,
       onProgress(current, total) {
         if (total > 0) {
