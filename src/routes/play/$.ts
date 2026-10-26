@@ -39,8 +39,7 @@ export const Route = createFileRoute("/play/$")({
           "content-type": TYPES[ext] ?? "application/octet-stream",
           "cache-control": "public, max-age=86400",
         });
-        const len = upstream.headers.get("content-length");
-        if (len) headers.set("content-length", len);
+        // No content-length: upstream may be gzip and fetch decompresses it.
         return new Response(upstream.body, { status: 200, headers });
       },
     },
