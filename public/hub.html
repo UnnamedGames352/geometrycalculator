@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UnnamedGamesHub</title>
+    <meta name="description" content="UnnamedGamesHub - A hub for all my deployments." />
+    <!-- Cloudflare Web Analytics --><!-- End Cloudflare Web Analytics -->
+    <style>
+      :root {
+        --bg-900: #07121d;
+        --bg-850: #0a1625;
+        --bg-800: #0e1a2d;
+        --bg-700: #121f32;
+        --panel: rgba(17, 24, 39, 0.8);
+        --panel-strong: rgba(15, 23, 42, 0.96);
+        --panel-border: rgba(148, 163, 184, 0.18);
+        --text: #edf6ff;
+        --muted: #a8b4c9;
+        --soft: #dfeafc;
+        --primary: #8b5cf6;
+        --primary-2: #6d7cff;
+        --green: #37d67a;
+        --blue: #5bb8ff;
+        --orange: #ffb64d;
+        --shadow: 0 28px 80px rgba(3, 7, 18, 0.52);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(139,92,246,0.18), transparent 25%),
+          radial-gradient(circle at right center, rgba(91,184,255,0.12), transparent 30%),
+          linear-gradient(180deg, var(--bg-900), var(--bg-850) 28%, var(--bg-800) 100%);
+        color: var(--text);
+      }
+
+      a { color: inherit; text-decoration: none; }
+      img { display: block; max-width: 100%; }
+      button { font: inherit; }
+
+      .container {
+        width: min(1240px, calc(100% - 2rem));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(16px);
+        background: rgba(7, 18, 29, 0.75);
+        border-bottom: 1px solid var(--panel-border);
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1.25rem;
+        min-height: 72px;
+      }
+
+      .brand {
+        font-size: 0.96rem;
+        font-weight: 900;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 1.35rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .nav-links a {
+        transition: color 0.2s ease;
+      }
+
+      .nav-links a:hover {
+        color: var(--text);
+      }
+
+      .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+      }
+
+      .nav-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 0.7rem 1rem;
+        border-radius: 12px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.03);
+        color: var(--text);
+        font-weight: 700;
+      }
+
+      .nav-btn.primary {
+        background: linear-gradient(135deg, var(--primary), var(--primary-2));
+        border-color: transparent;
+      }
+
+      .hero {
+        padding: 3rem 0 2.5rem;
+      }
+
+      .hero-shell {
+        background: linear-gradient(135deg, rgba(17,24,39,0.85), rgba(12,20,30,0.9));
+        border: 1px solid var(--panel-border);
+        border-radius: 28px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+      }
+
+      .hero-inner {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        min-height: 440px;
+      }
+
+      .hero-copy {
+        padding: 3.1rem 3rem 2.5rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        justify-content: center;
+        padding: 0.58rem 0.9rem;
+        border-radius: 999px;
+        border: 1px solid rgba(139,92,246,0.4);
+        background: rgba(139,92,246,0.12);
+        color: #dbceff;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 1.25rem 0 1rem;
+        font-size: clamp(2.9rem, 5vw, 5.2rem);
+        line-height: 0.92;
+        letter-spacing: -0.08em;
+      }
+
+      .hero-copy p {
+        margin: 0;
+        max-width: 620px;
+        color: var(--muted);
+        font-size: 1.08rem;
+        line-height: 1.8;
+      }
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 2rem;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0.9rem 1.35rem;
+        border-radius: 14px;
+        border: 1px solid transparent;
+        font-size: 0.95rem;
+        font-weight: 800;
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
+      }
+
+      .button:hover {
+        transform: translateY(-2px);
+      }
+
+      .button.primary {
+        background: linear-gradient(135deg, var(--primary), #9f67ff);
+        color: white;
+        box-shadow: 0 18px 38px rgba(139,92,246,0.4);
+      }
+
+      .button.secondary {
+        background: rgba(255,255,255,0.03);
+        border-color: var(--panel-border);
+        color: var(--text);
+      }
+
+      .hero-visual {
+        position: relative;
+        background:
+          linear-gradient(180deg, rgba(12,20,30,0.1), rgba(8,13,20,0.4)),
+          url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQNYCLhBv8bowjDwLdcqOZM9urPZIy1ZjzxEzNaPOZvyg&amp;s=10') center/cover no-repeat;
+      }
+
+      .hero-visual::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, transparent 0%, rgba(5, 9, 16, 0.72) 100%);
+      }
+
+      .featured-panel {
+        position: absolute;
+        left: 1.25rem;
+        right: 1.25rem;
+        bottom: 1.25rem;
+        background: rgba(14, 24, 38, 0.8);
+        border: 1px solid rgba(255,255,255,0.08);
+        backdrop-filter: blur(12px);
+        border-radius: 18px;
+        padding: 1rem 1rem 0.9rem;
+      }
+
+      .featured-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.7rem;
+      }
+
+      .featured-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.38rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(55,214,122,0.12);
+        border: 1px solid rgba(55,214,122,0.46);
+        color: #dbffe9;
+        font-size: 0.68rem;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .featured-tag .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      .featured-panel h3 {
+        margin: 0;
+        font-size: 1.7rem;
+        letter-spacing: -0.05em;
+      }
+
+      .featured-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.9rem;
+      }
+
+      .featured-meta span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        color: var(--soft);
+        padding: 0.38rem 0.7rem;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .section {
+        padding-top: 1.2rem;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1.1rem;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 2.7rem);
+        letter-spacing: -0.06em;
+      }
+
+      .section-head p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        margin-bottom: 1.4rem;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0.7rem 0.95rem;
+        border-radius: 999px;
+        border: 1px solid var(--panel-border);
+        background: rgba(255,255,255,0.02);
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .chip.active {
+        background: linear-gradient(135deg, rgba(139,92,246,0.22), rgba(91,184,255,0.16));
+        border-color: rgba(139,92,246,0.4);
+        color: var(--text);
+      }
+
+      .library {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1.3rem;
+        padding-bottom: 5rem;
+      }
+
+      .game-card {
+        background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(15,23,42,0.76));
+        border: 1px solid var(--panel-border);
+        border-radius: 22px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        transition: transform 0.2s ease, border-color 0.2s ease;
+      }
+
+      .game-card:hover {
+        transform: translateY(-4px);
+        border-color: rgba(139,92,246,0.45);
+      }
+
+      .game-art {
+        position: relative;
+        min-height: 190px;
+        overflow: hidden;
+        background-size: cover;
+        background-position: center;
+      }
+
+      .game-art::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(to top, rgba(0,0,0,0.68), rgba(0,0,0,0.12));
+      }
+
+      .game-art img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .game-art span {
+        position: absolute;
+        left: 1rem;
+        bottom: 1rem;
+        z-index: 1;
+        font-size: 1.48rem;
+        font-weight: 900;
+        letter-spacing: -0.05em;
+      }
+
+      .game-body {
+        padding: 1.15rem 1.15rem 1.2rem;
+      }
+
+      .game-tag {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.36rem 0.7rem;
+        border-radius: 999px;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: rgba(91,184,255,0.11);
+        border: 1px solid rgba(91,184,255,0.28);
+        color: #d6efff;
+      }
+
+      .game-body h3 {
+        margin: 0.8rem 0 0.5rem;
+        font-size: 1.45rem;
+        letter-spacing: -0.04em;
+      }
+
+      .game-body p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.65;
+      }
+
+      .game-footer {
+        margin-top: 1.1rem;
+      }
+
+      .game-card .button {
+        width: 100%;
+        padding: 0.82rem 1rem;
+      }
+
+      .about-wrap {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 1.4rem;
+        align-items: start;
+        padding-bottom: 4rem;
+      }
+
+      .about-copy {
+        background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(15,23,42,0.82));
+        border: 1px solid var(--panel-border);
+        border-radius: 22px;
+        padding: 1.4rem;
+        color: var(--muted);
+        line-height: 1.8;
+        font-size: 1.04rem;
+      }
+
+      .stats-panel {
+        background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(15,23,42,0.82));
+        border: 1px solid var(--panel-border);
+        border-radius: 22px;
+        padding: 1.2rem;
+      }
+
+      .mini-stats {
+        display: grid;
+        gap: 0.8rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .mini-stat {
+        background: rgba(148,163,184,0.04);
+        border: 1px solid rgba(148,163,184,0.12);
+        border-radius: 16px;
+        padding: 1rem 0.8rem;
+      }
+
+      .mini-stat strong {
+        display: block;
+        font-size: 1.6rem;
+        margin-bottom: 0.2rem;
+      }
+
+      .mini-stat span {
+        color: var(--muted);
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      footer {
+        padding: 1rem 0 3rem;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      @media (max-width: 980px) {
+        .hero-inner,
+        .about-wrap,
+        .library {
+          grid-template-columns: 1fr;
+        }
+
+        .nav {
+          flex-direction: column;
+          padding: 1rem 0;
+        }
+
+        .nav-links {
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .hero-copy {
+          padding: 2rem 1.1rem 1.5rem;
+        }
+
+        .featured-panel {
+          left: 0.8rem;
+          right: 0.8rem;
+          bottom: 0.8rem;
+        }
+
+        .mini-stats {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="container nav">
+        <a class="brand" href="#top">UnnamedGamesHub</a>
+        <nav class="nav-links" aria-label="Main navigation">
+          <a href="#browse">Browse</a>
+          <a href="#featured">Featured</a>
+          <a href="#about">About</a>
+        </nav>
+        <div class="nav-actions">
+          <a class="nav-btn" href="#browse">Library</a>
+          <a class="nav-btn primary" href="#games">Play Now</a>
+        </div>
+      </div>
+    </div>
+
+    <main id="top" class="container">
+      <header class="hero" id="featured">
+        <div class="hero-shell">
+          <div class="hero-inner">
+            <div class="hero-copy">
+              <span class="eyebrow">Game Portal</span>
+              <h1>Unnamed Games Hub</h1>
+              <p>
+                A portal for all my browser game deployments.
+              </p>
+              <div class="cta-row">
+                <a class="button primary" href="#games">Browse all games</a>
+                <a class="button secondary" href="#about">Learn more</a>
+              </div>
+            </div>
+
+            <div class="hero-visual" aria-label="Featured game panel">
+              <div class="featured-panel">
+                <div class="featured-panel-header">
+                  <span class="featured-tag"><span class="dot"></span> Live</span>
+                  <span style="color: var(--muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;">Featured</span>
+                </div>
+                <h3>Super Liquid Soccer</h3>
+                <div class="featured-meta">
+                  <span>Added</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="section" id="browse">
+        <div class="section-head">
+          <h2>Browse</h2>
+          <p>New deployments.</p>
+        </div>
+
+        <div class="chip-row" aria-label="Game categories">
+          <span class="chip active">All</span>
+          <span class="chip">Action</span>
+          <span class="chip">Arcade</span>
+          <span class="chip">Racing</span>
+          <span class="chip">Sports</span>
+          <span class="chip">Adventure</span>
+          <span class="chip">Survival</span>
+        </div>
+
+        <div class="library" id="games">
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQc71TdKnjLCLeI1u1FxL0mzdoXsgJVc9AD2q_cfsDP7Q&amp;s=10" alt="Brotato Review - Niche Gamer" />
+              <span>Brotato</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Action</span>
+              <h3>Brotato</h3>
+              <p>Quick, exciting gameplay with nonstop action and challenge.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/Brotato/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art" style="background-image:url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR8xLUVl5nrwVjI8S24TNsZJn51qLi2wS7sYuQJ8yJoDQ&amp;s=10');">
+              <span>Tanuki Sunset</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Adventure</span>
+              <h3>Tanuki Sunset</h3>
+              <p>An immersive experience with a relaxed style and engaging world.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/Tanuki-Sunset/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art" style="background-image:url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTAePwQRTChoOCniEwkiVAtnY7WK6xjd1efBa-rMko3BA&amp;s=10');">
+              <span>Burrito Bison</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Arcade</span>
+              <h3>Burrito Bison</h3>
+              <p>Chaotic fun and fast-paced gameplay built for short, replayable sessions.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/BurritoBison/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTgC3NHkRqcYMEaG1FlLPwfU6lk32HljuGkz-R6NNy4GQ&amp;s=10" alt="Retro Bowl Review (Switch eShop) | Nintendo Life" />
+              <span>Retro Bowl</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Sports</span>
+              <h3>Retro Bowl</h3>
+              <p>Experience classic football gameplay with retro-style graphics and addictive action.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/retro-bowl/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art" style="background-image:url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQL8vvSil6u-U30QgrSRQ9IeQfWhQPIbHReO8Zd3c4m5Q&s=10');">
+              <span>Slope</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Arcade</span>
+              <h3>Slope</h3>
+              <p>Roll down an endless slope while avoiding obstacles. Test your reflexes and set high scores.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/Slope/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art" style="background-image:url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRHbqi4fIt1P1yPIPLsviPFKyFrv5GJ5mFr-drzAji1ig&s=10');">
+              <span>Cookie Clicker</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Clicker</span>
+              <h3>Cookie Clicker</h3>
+              <p>Click your way to cookie empire in this addictive incremental game with endless progression.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/Cookie-Clicker/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQagtKKzT_BRNNIfmKoHyqTbPEunuv4t_R_7Cfl0pKwHQ&amp;s=10" alt="Basket Random 🏀 Play on CrazyGames" />
+              <span>Basket Random</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Sports</span>
+              <h3>Basket Random</h3>
+              <p>Crazy basketball action with unpredictable physics and competitive one-on-one matchups.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/BasketRandom/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRk6xPWK018aKReNlm_L1nT6j5PJVMmzAJ0KOt6hwGezg&amp;s=10" alt="The Hypnotizing Simplicity of Hollow Knight — Scene+Heard" />
+              <span>Hollow Knight</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Metroidvania</span>
+              <h3>Hollow Knight</h3>
+              <p>Explore a vast, hand-drawn kingdom of insects and uncover ancient secrets in this atmospheric metroidvania.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/HollowKnight/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR6TZXJV8u1bYlASf5YJPXtd75nnRUKbbrBXYO2mGNvuQ&amp;s" alt="Level Devil on Steam" />
+              <span>Level Devil</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Platformer</span>
+              <h3>Level Devil</h3>
+              <p>Dodge traps and conquer devilishly difficult levels in this precision platformer.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/LevelDevil/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSan9fsVRNzVM__W5V21N6h77H8LJwNltsjG9-8ycbOPg&amp;s=10" alt="How to Fish | GAMES.GG" />
+              <span>How To Fish</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Casual</span>
+              <h3>How To Fish</h3>
+              <p>Relax by the water and learn the ropes of fishing in this calming casual experience.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/HowToFish/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSnMTP45Tr5uJA48O8BRvh4sWlPFmDWNkGAR_941dMMg&amp;s=10" alt="PolyTrack 0.3.0 - Checkpoints &amp; leaderboards - PolyTrack" />
+              <span>Poly Track</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Racing</span>
+              <h3>Poly Track</h3>
+              <p>Race through colorful tracks, hit checkpoints, and push for faster lap times.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/polytrack/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQBZKE-_ttbttBmFV-79CzrZysTy9AYZvn3EzcwDl_Shg&amp;s=10" alt="Crazy Cattle 3D (video game, battle royale, third-person, animal)" />
+              <span>Crazy Cattle 3D</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Battle Royale</span>
+              <h3>Crazy Cattle 3D</h3>
+              <p>Absurd third-person battle royale with animals — chaotic multiplayer mayhem.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/CrazyCattle3D/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRHuI4VWXGI4Grxi62JDs6jQUWyQAFKwB8IezVhNE82Xw&amp;s=10" alt="Drift Boss by AshTheAndroid - Game Jolt" />
+              <span>Drift Boss</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Racing</span>
+              <h3>Drift Boss</h3>
+              <p>Master tight drifts, build momentum, and survive increasingly tricky courses.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/drift-boss/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQNYCLhBv8bowjDwLdcqOZM9urPZIy1ZjzxEzNaPOZvyg&amp;s=10" alt="Super Liquid Soccer on Steam" />
+              <span>Super Liquid Soccer</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Sports</span>
+              <h3>Super Liquid Soccer</h3>
+              <p>Play a slick, fluid football game packed with quick reactions and arcade style goals.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/SuperLiquidSoccer/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art" style="background-image:url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTW4H9arR_ulsPGpBUuuiabxwj_XFyrYtixjj5lRpy6Nw&amp;s=10');">
+              <span>10 Minutes Till Dawn</span>
+            </div>
+            <div class="game-body">
+              <span class="game-tag">Survival</span>
+              <h3>10 Minutes Till Dawn</h3>
+              <p>Survive intense waves of enemies for 10 minutes in this challenging roguelike shooter.</p>
+              <div class="game-footer">
+                <a class="button primary" href="/play/10MinutesTillDawn/" target="_blank" rel="noreferrer">Play Now</a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="about">
+        <div class="section-head">
+          <h2>About This Hub</h2>
+        </div>
+        <div class="about-wrap">
+          <div class="about-copy">
+            This website acts as a central hub for all of my deployments.
+          </div>
+
+          <div class="stats-panel">
+            <div class="mini-stats">
+              <div class="mini-stat">
+                <strong>15+</strong>
+                <span>Games</span>
+              </div>
+              <div class="mini-stat">
+                <strong>24/7</strong>
+                <span>Online</span>
+              </div>
+              <div class="mini-stat">
+                <strong>5+</strong>
+                <span>Genres</span>
+              </div>
+              <div class="mini-stat">
+                <strong>∞</strong>
+                <span>Updates</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <p>© 2026 UnnamedGamesHub</p>
+      </footer>
+    </main>
+  </body>
+</html>
