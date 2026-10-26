@@ -2,7 +2,5 @@
 
 ## Games hub
 
-- [ ] Wait for user to upload their old GitHub Pages game-hub files (ZIP/folder)
-- [ ] Inspect uploaded files: identify games, structure, assets
-- [ ] Rebuild the games hub in this project (games playable in-browser)
-- [ ] Verify games run in the preview and report status
+- [x] Build hub page with Brotato (loads big files from GitHub via jsDelivr)
+- [ ] Add more games — waiting on user's other repo links
