@@ -19,6 +19,8 @@ export const Route = createFileRoute("/play/$")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
+        const { isUnlocked } = await import("@/lib/gate.server");
+        if (!(await isUnlocked())) return new Response("Not Found", { status: 404 });
         const splat = (params as { _splat?: string })._splat ?? "";
         if (splat.includes("..") || !splat) return new Response("Bad path", { status: 400 });
         const url = new URL(request.url);
