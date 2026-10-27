@@ -24,7 +24,7 @@ export const Route = createFileRoute("/play/$")({
         const splat = (params as { _splat?: string })._splat ?? "";
         if (splat.includes("..") || !splat) return new Response("Bad path", { status: 400 });
         const url = new URL(request.url);
-        const [repo, ...rest] = splat.split("/");
+        const [repo = "", ...rest] = splat.split("/");
         if (!/^[\w.-]+$/.test(repo)) return new Response("Bad repo", { status: 400 });
         // Repo root without trailing slash: redirect so relative files resolve.
         if (rest.length === 0 && !url.pathname.endsWith("/")) {

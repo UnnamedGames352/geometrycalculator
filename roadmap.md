@@ -6,4 +6,4 @@
 - [x] Tested all 15 games through startup
 - [x] Added Geometry Dash card (16 games); Silksong skipped per user
 - [x] Re-tested all 16 games through startup — all load
-- [ ] Fake error page with hidden button + password unlock (needs SITE_PASSWORD from user)
+- [x] Fake error page with hidden button + password unlock (needs SITE_PASSWORD from user)
