@@ -30,9 +30,15 @@ export const Route = createFileRoute("/play/$")({
         }
         let file = rest.join("/");
         if (file === "" || file.endsWith("/")) file += "index.html";
-        const upstream = await fetch(
-          `https://raw.githubusercontent.com/${OWNER}/${repo}/HEAD/${file.split("/").map(encodeURIComponent).join("/")}`,
-        );
+        const raw = (f: string) =>
+          `https://raw.githubusercontent.com/${OWNER}/${repo}/HEAD/${f.split("/").map(encodeURIComponent).join("/")}`;
+        let upstream = await fetch(raw(file));
+        // Some games reference "_2_" texture variants that don't exist in the
+        // repo; fall back to the base texture (e.g. groundSquare_01_2_001 -> _001).
+        if (upstream.status === 404 && /_\d+_(?=\d+\.[^.]+$)/.test(file)) {
+          const alt = file.replace(/_\d+_(?=\d+\.[^.]+$)/, "_");
+          if (alt !== file) upstream = await fetch(raw(alt));
+        }
         if (!upstream.ok) return new Response("Not found", { status: upstream.status });
         const ext = file.split(".").pop()?.toLowerCase() ?? "";
         const headers = new Headers({
