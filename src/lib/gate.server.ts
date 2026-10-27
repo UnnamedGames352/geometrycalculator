@@ -1,7 +1,7 @@
 import { useSession } from "@tanstack/react-start/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 
-type GateSession = { unlocked?: boolean };
+type GateSession = { unlocked?: boolean; admin?: boolean };
 
 const config = () => ({
   password: process.env["SESSION_SECRET"]!,

@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { checkUnlocked, unlockSite } from "@/lib/gate.functions";
+import { checkUnlocked, redeemCode } from "@/lib/gate.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,14 +29,14 @@ function Index() {
 
 function FakeError() {
   const router = useRouter();
-  const unlock = useServerFn(unlockSite);
+  const unlock = useServerFn(redeemCode);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const password = new FormData(e.currentTarget).get("password") as string;
-    const { ok } = await unlock({ data: { password } });
+    const code = new FormData(e.currentTarget).get("code") as string;
+    const { ok } = await unlock({ data: { code } });
     if (ok) await router.invalidate();
     else setError(true);
   }
@@ -52,7 +52,7 @@ function FakeError() {
       </p>
       {open && (
         <form onSubmit={onSubmit} className="mx-auto mt-10 flex max-w-xs gap-2">
-          <input name="password" type="password" autoFocus autoComplete="off"
+          <input name="code" type="text" autoFocus autoComplete="off"
             className="flex-1 border border-border bg-background px-2 py-1 text-sm" />
           <button type="submit" className="border border-border px-3 text-sm">→</button>
         </form>
