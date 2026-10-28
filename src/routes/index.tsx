@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
-import { checkUnlocked, redeemCode } from "@/lib/gate.functions";
+import { useEffect, useState } from "react";
+import { checkUnlocked, lockGate, redeemCode } from "@/lib/gate.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -21,7 +21,17 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   const { unlocked } = Route.useLoaderData();
-  if (unlocked) {
+  const router = useRouter();
+  const lock = useServerFn(lockGate);
+  const [tabOk, setTabOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    // Access only lasts for the tab that entered the code.
+    const ok = sessionStorage.getItem("gate-tab") === "1";
+    setTabOk(ok);
+    if (unlocked && !ok) lock().then(() => router.invalidate());
+  }, [unlocked]);
+  if (unlocked && tabOk === null) return null;
+  if (unlocked && tabOk) {
     return <iframe src="/hub" title="UnnamedGamesHub" className="fixed inset-0 h-full w-full border-0" />;
   }
   return <FakeError />;
@@ -37,7 +47,7 @@ function FakeError() {
     e.preventDefault();
     const code = new FormData(e.currentTarget).get("code") as string;
     const { ok } = await unlock({ data: { code } });
-    if (ok) await router.invalidate();
+    if (ok) { sessionStorage.setItem("gate-tab", "1"); await router.invalidate(); }
     else setError(true);
   }
 

@@ -63,3 +63,11 @@ export const deleteCode = createServerFn({ method: "POST" })
     await supabaseAdmin.from("access_codes").delete().eq("code", data.code);
     return { ok: true };
   });
+
+// Locks this browser again (used when a new tab opens without having entered a code).
+export const lockGate = createServerFn({ method: "POST" }).handler(async () => {
+  const { getGateSession } = await import("./gate.server");
+  const s = await getGateSession();
+  await s.update({ ...s.data, unlocked: false });
+  return { ok: true };
+});
