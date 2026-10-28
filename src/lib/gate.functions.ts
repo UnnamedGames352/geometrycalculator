@@ -31,6 +31,15 @@ export const adminLogin = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+// Locks the admin page again (used when a new tab opens without having entered the passcode).
+export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => {
+  const { getGateSession } = await import("./gate.server");
+  const s = await getGateSession();
+  await s.update({ ...s.data, admin: false });
+  return { ok: true };
+});
+
+
 async function requireAdmin() {
   const { getGateSession } = await import("./gate.server");
   const s = await getGateSession();
