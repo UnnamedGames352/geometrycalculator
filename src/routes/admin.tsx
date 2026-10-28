@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
-import { adminLogin, createCode, deleteCode, listCodes } from "@/lib/gate.functions";
+import { useEffect, useState } from "react";
+import { adminLogin, createCode, deleteCode, listCodes, lockAdmin } from "@/lib/gate.functions";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -25,9 +25,19 @@ function Admin() {
   const login = useServerFn(adminLogin);
   const make = useServerFn(createCode);
   const remove = useServerFn(deleteCode);
+  const lock = useServerFn(lockAdmin);
   const [err, setErr] = useState(false);
+  const [tabOk, setTabOk] = useState<boolean | null>(null);
 
-  if (!admin) {
+  useEffect(() => {
+    // Admin access only lasts for the tab that entered the passcode.
+    const ok = sessionStorage.getItem("admin-tab") === "1";
+    setTabOk(ok);
+    if (admin && !ok) lock().then(() => router.invalidate());
+  }, [admin]);
+
+  if (admin && tabOk === null) return null;
+  if (!admin || !tabOk) {
     return (
       <div className="min-h-screen bg-background p-8 font-serif text-foreground">
         <h1 className="text-center text-3xl font-bold">404 Not Found</h1>
@@ -38,7 +48,8 @@ function Admin() {
             e.preventDefault();
             const password = new FormData(e.currentTarget).get("password") as string;
             const { ok } = await login({ data: { password } });
-            if (ok) await router.invalidate(); else setErr(true);
+            if (ok) { sessionStorage.setItem("admin-tab", "1"); await router.invalidate(); }
+            else setErr(true);
           }}
         >
           <input name="password" type="password" autoComplete="off" className="flex-1 border border-border bg-background px-2 py-1 text-sm" />
