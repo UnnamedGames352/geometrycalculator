@@ -48,7 +48,7 @@ function FakeError() {
     const code = new FormData(e.currentTarget).get("code") as string;
     const { ok } = await unlock({ data: { code } });
     if (ok) { sessionStorage.setItem("gate-tab", "1"); await router.invalidate(); }
-    else setError(true);
+    else await router.navigate({ to: "/geometry" });
   }
 
   return (
