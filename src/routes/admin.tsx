@@ -38,27 +38,9 @@ function Admin() {
 
   if (admin && tabOk === null) return null;
   if (!admin || !tabOk) {
-    return (
-      <div className="min-h-screen bg-background p-8 font-serif text-foreground">
-        <h1 className="text-center text-3xl font-bold">404 Not Found</h1>
-        <hr className="my-4 border-border" />
-        <form
-          className="mx-auto mt-10 flex max-w-xs gap-2"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const password = new FormData(e.currentTarget).get("password") as string;
-            const { ok } = await login({ data: { password } });
-            if (ok) { sessionStorage.setItem("admin-tab", "1"); await router.invalidate(); }
-            else await router.navigate({ to: "/geometry" });
-          }}
-        >
-          <input name="password" type="password" autoComplete="off" className="flex-1 border border-border bg-background px-2 py-1 text-sm" />
-          <button type="submit" className="border border-border px-3 text-sm">→</button>
-        </form>
-        {err && <p className="mt-2 text-center text-sm text-muted-foreground">nope</p>}
-      </div>
-    );
+    return <AdminGate />;
   }
+
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-background p-8 text-foreground">
