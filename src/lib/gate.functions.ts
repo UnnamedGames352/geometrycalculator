@@ -13,10 +13,58 @@ export const redeemCode = createServerFn({ method: "POST" })
     const { getGateSession } = await import("./gate.server");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rows } = await supabaseAdmin.from("access_codes").delete().eq("code", data.code).select("code");
-    if (!rows?.length) return { ok: false as const };
     const s = await getGateSession();
-    await s.update({ ...s.data, unlocked: true });
+    if (rows?.length) {
+      await s.update({ ...s.data, unlocked: true, friendId: undefined, token: undefined });
+      return { ok: true as const };
+    }
+    // Personal friend password: newest sign-in wins, older device gets kicked out.
+    const { data: friend } = await supabaseAdmin.from("friend_passwords").select("id").eq("password", data.code).maybeSingle();
+    if (!friend) return { ok: false as const };
+    const { randomBytes } = await import("node:crypto");
+    const token = randomBytes(16).toString("hex");
+    await supabaseAdmin.from("friend_passwords")
+      .update({ active_session: token, last_login: new Date().toISOString() }).eq("id", friend.id);
+    await s.update({ ...s.data, unlocked: true, friendId: friend.id, token });
     return { ok: true as const };
+  });
+
+export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
+  const { getGateSession } = await import("./gate.server");
+  if (!(await getGateSession()).data.admin) return { friends: [] as { id: string; name: string; password: string; online: boolean; last_login: string | null }[] };
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
+  return { friends: (data ?? []).map((f) => ({ id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login })) };
+});
+
+export const createFriend = createServerFn({ method: "POST" })
+  .inputValidator((d: { name: string }) => ({ name: String(d?.name ?? "").trim().slice(0, 40) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { randomBytes } = await import("node:crypto");
+    const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const password = Array.from(randomBytes(10), (b) => abc[b % abc.length]).join("");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("friend_passwords").insert({ name: data.name, password });
+    return { password };
+  });
+
+export const deleteFriend = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("friend_passwords").delete().eq("id", data.id);
+    return { ok: true };
+  });
+
+export const kickFriend = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("friend_passwords").update({ active_session: null }).eq("id", data.id);
+    return { ok: true };
   });
 
 // Owner signs in to the secret admin page with SITE_PASSWORD.
