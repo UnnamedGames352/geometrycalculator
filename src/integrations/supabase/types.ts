@@ -29,6 +29,33 @@ export type Database = {
         }
         Relationships: []
       }
+      friend_passwords: {
+        Row: {
+          active_session: string | null
+          created_at: string
+          id: string
+          last_login: string | null
+          name: string
+          password: string
+        }
+        Insert: {
+          active_session?: string | null
+          created_at?: string
+          id?: string
+          last_login?: string | null
+          name?: string
+          password: string
+        }
+        Update: {
+          active_session?: string | null
+          created_at?: string
+          id?: string
+          last_login?: string | null
+          name?: string
+          password?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
