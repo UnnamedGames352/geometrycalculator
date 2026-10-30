@@ -1,7 +1,9 @@
 import { useSession } from "@tanstack/react-start/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 
-type GateSession = { unlocked?: boolean; admin?: boolean };
+// friendId/token are set when a friend signs in with a personal password;
+// only the most recent sign-in token for that password stays valid.
+type GateSession = { unlocked?: boolean; admin?: boolean; friendId?: string; token?: string };
 
 const config = () => ({
   password: process.env["SESSION_SECRET"]!,
@@ -13,7 +15,12 @@ export const getGateSession = () => useSession<GateSession>(config());
 
 export async function isUnlocked() {
   const s = await getGateSession();
-  return !!s.data.unlocked;
+  if (!s.data.unlocked) return false;
+  if (s.data.admin || !s.data.friendId) return true;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin
+    .from("friend_passwords").select("active_session").eq("id", s.data.friendId).maybeSingle();
+  return !!data && data.active_session === s.data.token;
 }
 
 export function passwordMatches(input: string, expected: string) {
