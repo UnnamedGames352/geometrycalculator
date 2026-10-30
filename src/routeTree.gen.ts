@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as GeometryRouteImport } from './routes/geometry'
 import { Route as HubRouteImport } from './routes/hub'
 import { Route as PlaySplatRouteImport } from './routes/play/$'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GeometryRoute = GeometryRouteImport.update({
+  id: '/geometry',
+  path: '/geometry',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HubRoute = HubRouteImport.update({
@@ -38,12 +44,14 @@ const PlaySplatRoute = PlaySplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/geometry': typeof GeometryRoute
   '/hub': typeof HubRoute
   '/play/$': typeof PlaySplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/geometry': typeof GeometryRoute
   '/hub': typeof HubRoute
   '/play/$': typeof PlaySplatRoute
 }
@@ -51,20 +59,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/geometry': typeof GeometryRoute
   '/hub': typeof HubRoute
   '/play/$': typeof PlaySplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/hub' | '/play/$'
+  fullPaths: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/hub' | '/play/$'
-  id: '__root__' | '/' | '/admin' | '/hub' | '/play/$'
+  to: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
   HubRoute: typeof HubRoute
   PlaySplatRoute: typeof PlaySplatRoute
 }
@@ -83,6 +93,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/hub': {
@@ -105,6 +122,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
   HubRoute: HubRoute,
   PlaySplatRoute: PlaySplatRoute,
 }

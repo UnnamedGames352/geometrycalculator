@@ -49,7 +49,7 @@ function Admin() {
             const password = new FormData(e.currentTarget).get("password") as string;
             const { ok } = await login({ data: { password } });
             if (ok) { sessionStorage.setItem("admin-tab", "1"); await router.invalidate(); }
-            else setErr(true);
+            else await router.navigate({ to: "/geometry" });
           }}
         >
           <input name="password" type="password" autoComplete="off" className="flex-1 border border-border bg-background px-2 py-1 text-sm" />
