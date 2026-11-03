@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 // friendId/token are set when a friend signs in with a personal password;
 // only the most recent sign-in token for that password stays valid.
-type GateSession = { unlocked?: boolean; admin?: boolean; friendId?: string; token?: string };
+type GateSession = { unlocked?: boolean; admin?: boolean; friendId?: string | undefined; token?: string | undefined };
 
 const config = () => ({
   password: process.env["SESSION_SECRET"]!,
