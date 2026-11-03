@@ -1,18 +1,6 @@
 # Geometrycalculator
 
-can I just get a subdomain from you for my GitHub project
-
-This project was built with [Lovable](https://lovable.dev).
-
 **Live app**: https://geometrycalculator.lovable.app
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/7f69225f-6a16-45a8-aa7b-6e89d4578f2e).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
