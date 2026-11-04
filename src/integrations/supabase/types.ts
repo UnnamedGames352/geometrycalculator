@@ -29,30 +29,81 @@ export type Database = {
         }
         Relationships: []
       }
+      activity_log: {
+        Row: {
+          at: string
+          detail: string
+          id: string
+          kind: string
+        }
+        Insert: {
+          at?: string
+          detail?: string
+          id?: string
+          kind: string
+        }
+        Update: {
+          at?: string
+          detail?: string
+          id?: string
+          kind?: string
+        }
+        Relationships: []
+      }
       friend_passwords: {
         Row: {
           active_session: string | null
           created_at: string
+          expires_at: string | null
           id: string
           last_login: string | null
+          last_seen: string | null
           name: string
           password: string
+          paused: boolean
         }
         Insert: {
           active_session?: string | null
           created_at?: string
+          expires_at?: string | null
           id?: string
           last_login?: string | null
+          last_seen?: string | null
           name?: string
           password: string
+          paused?: boolean
         }
         Update: {
           active_session?: string | null
           created_at?: string
+          expires_at?: string | null
           id?: string
           last_login?: string | null
+          last_seen?: string | null
           name?: string
           password?: string
+          paused?: boolean
+        }
+        Relationships: []
+      }
+      site_settings: {
+        Row: {
+          hidden_games: string[]
+          id: number
+          kick_all_at: string | null
+          lockdown: boolean
+        }
+        Insert: {
+          hidden_games?: string[]
+          id?: number
+          kick_all_at?: string | null
+          lockdown?: boolean
+        }
+        Update: {
+          hidden_games?: string[]
+          id?: number
+          kick_all_at?: string | null
+          lockdown?: boolean
         }
         Relationships: []
       }

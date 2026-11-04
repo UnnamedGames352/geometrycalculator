@@ -26,6 +26,8 @@ export const Route = createFileRoute("/play/$")({
         const url = new URL(request.url);
         const [repo = "", ...rest] = splat.split("/");
         if (!/^[\w.-]+$/.test(repo)) return new Response("Bad repo", { status: 400 });
+        const { isHidden } = await import("@/lib/gate.server");
+        if (await isHidden(repo)) return new Response("Not Found", { status: 404 });
         // Repo root without trailing slash: redirect so relative files resolve.
         if (rest.length === 0 && !url.pathname.endsWith("/")) {
           return Response.redirect(new URL(url.pathname + "/" + url.search, url).toString(), 301);
