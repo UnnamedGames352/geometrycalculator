@@ -19,9 +19,6 @@ export const Route = createFileRoute("/admin")({
   component: Admin,
 });
 
-
-const GAMES = ["Brotato", "Tanuki-Sunset", "BurritoBison", "retro-bowl", "Slope", "Cookie-Clicker", "BasketRandom", "HollowKnight", "LevelDevil", "HowToFish", "polytrack", "CrazyCattle3D", "drift-boss", "SuperLiquidSoccer", "10MinutesTillDawn", "GeometryDash"];
-
 const when = (t: string | null) => (t ? new Date(t).toLocaleString() : "never");
 const btn = "rounded border border-border px-2 py-1 text-xs";
 
@@ -80,21 +77,6 @@ function Admin() {
           <div className="text-xs text-muted-foreground">Signs out every friend and code user right now.</div>
         </div>
         <button className={btn} onClick={async () => { if (confirm("Kick everyone out?")) { await save({ data: { kickAll: true } }); await refresh(); } }}>Kick all</button>
-      </div>
-      <div className="mt-3 rounded border border-border p-3">
-        <div className="font-medium">Games</div>
-        <div className="text-xs text-muted-foreground">Untick a game to hide it from friends.</div>
-        <div className="mt-2 grid grid-cols-2 gap-1 text-sm">
-          {GAMES.map((g) => (
-            <label key={g} className="flex items-center gap-2">
-              <input type="checkbox" checked={!settings.hidden_games.includes(g)} onChange={async (e) => {
-                const hidden = e.target.checked ? settings.hidden_games.filter((x) => x !== g) : [...settings.hidden_games, g];
-                await save({ data: { hidden_games: hidden } }); await refresh();
-              }} />
-              {g}
-            </label>
-          ))}
-        </div>
       </div>
 
       <h2 className="mt-10 text-xl font-bold">One-time codes</h2>
@@ -203,4 +185,3 @@ function AdminGate() {
     </div>
   );
 }
-
