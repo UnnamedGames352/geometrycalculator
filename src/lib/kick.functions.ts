@@ -24,12 +24,17 @@ export const kickFriend = createServerFn({ method: "POST" })
 
 export const kickEveryone = createServerFn({ method: "POST" }).handler(async () => {
   await requireAdmin();
+  const { getSettings } = await import("./gate.server");
+  const current = await getSettings();
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const kickAllAt = new Date().toISOString();
 
-  const { error: settingsError } = await supabaseAdmin
-    .from("site_settings")
-    .upsert({ id: 1, kick_all_at: kickAllAt });
+  const { error: settingsError } = await supabaseAdmin.from("site_settings").upsert({
+    id: 1,
+    lockdown: current.lockdown,
+    hidden_games: current.hidden_games,
+    kick_all_at: kickAllAt,
+  });
   if (settingsError) throw new Error(`Could not update the kick timestamp: ${settingsError.message}`);
 
   const { error: friendsError } = await supabaseAdmin
