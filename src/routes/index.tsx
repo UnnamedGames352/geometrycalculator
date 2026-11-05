@@ -30,6 +30,15 @@ function Index() {
     setTabOk(ok);
     if (unlocked && !ok) lock().then(() => router.invalidate());
   }, [unlocked]);
+  // Watch for being kicked out, even while a game is open inside the page.
+  const check = useServerFn(checkUnlocked);
+  useEffect(() => {
+    if (!unlocked || !tabOk) return;
+    const id = setInterval(async () => {
+      try { if (!(await check()).unlocked) window.location.replace("/"); } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [unlocked, tabOk]);
   if (unlocked && tabOk === null) return null;
   if (unlocked && tabOk) {
     return <iframe src="/hub" title="UnnamedGamesHub" className="fixed inset-0 h-full w-full border-0" />;

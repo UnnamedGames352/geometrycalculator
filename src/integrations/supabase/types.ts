@@ -54,35 +54,47 @@ export type Database = {
         Row: {
           active_session: string | null
           created_at: string
+          device: string | null
           expires_at: string | null
           id: string
+          ip: string | null
           last_login: string | null
           last_seen: string | null
+          location: string | null
           name: string
           password: string
           paused: boolean
+          user_agent: string | null
         }
         Insert: {
           active_session?: string | null
           created_at?: string
+          device?: string | null
           expires_at?: string | null
           id?: string
+          ip?: string | null
           last_login?: string | null
           last_seen?: string | null
+          location?: string | null
           name?: string
           password: string
           paused?: boolean
+          user_agent?: string | null
         }
         Update: {
           active_session?: string | null
           created_at?: string
+          device?: string | null
           expires_at?: string | null
           id?: string
+          ip?: string | null
           last_login?: string | null
           last_seen?: string | null
+          location?: string | null
           name?: string
           password?: string
           paused?: boolean
+          user_agent?: string | null
         }
         Relationships: []
       }
