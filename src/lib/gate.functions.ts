@@ -31,20 +31,30 @@ export const redeemCode = createServerFn({ method: "POST" })
     const { randomBytes } = await import("node:crypto");
     const token = randomBytes(16).toString("hex");
     await supabaseAdmin.from("friend_passwords")
-      .update({ active_session: token, last_login: new Date().toISOString() }).eq("id", friend.id);
+      .update({ active_session: token, last_login: new Date().toISOString(), ...(await deviceInfo()) }).eq("id", friend.id);
     await s.update({ ...s.data, unlocked: true, friendId: friend.id, token, at: Date.now() });
     await logActivity("login", `${friend.name} signed in`);
     return { ok: true as const };
   });
 
-type Friend = { id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null };
+async function deviceInfo() {
+  const { getRequestHeader } = await import("@tanstack/react-start/server");
+  const ua = getRequestHeader("user-agent") ?? "";
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Firefox|FxiOS/.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Unknown browser";
+  const os = /CrOS/.test(ua) ? "Chromebook" : /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? (/Mobile/.test(ua) ? "Android phone" : "Android tablet") : /Windows/.test(ua) ? "Windows PC" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Unknown device";
+  const ip = getRequestHeader("cf-connecting-ip") ?? getRequestHeader("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+  const loc = [getRequestHeader("cf-ipcity"), getRequestHeader("cf-region"), getRequestHeader("cf-ipcountry")].filter(Boolean).join(", ");
+  return { device: `${browser} on ${os}`, ip, location: loc || null, user_agent: ua.slice(0, 300) };
+}
+
+type Friend = { id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null };
 
 export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
   if (!(await getGateSession()).data.admin) return { friends: [] as Friend[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
-  return { friends: (data ?? []).map((f): Friend => ({ id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at })) };
+  return { friends: (data ?? []).map((f): Friend => ({ id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent })) };
 });
 
 export const createFriend = createServerFn({ method: "POST" })
