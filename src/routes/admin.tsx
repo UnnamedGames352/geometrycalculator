@@ -1,7 +1,8 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { adminLogin, clearActivity, getActivity, saveSettings, updateFriend, createCode, createFriend, deleteCode, deleteFriend, kickFriend, listCodes, listFriends, lockAdmin } from "@/lib/gate.functions";
+import { adminLogin, clearActivity, getActivity, saveSettings, updateFriend, createCode, createFriend, deleteCode, deleteFriend, listCodes, listFriends, lockAdmin } from "@/lib/gate.functions";
+import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
