@@ -1,7 +1,8 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { adminLogin, clearActivity, getActivity, saveSettings, updateFriend, createCode, createFriend, deleteCode, deleteFriend, kickFriend, listCodes, listFriends, lockAdmin } from "@/lib/gate.functions";
+import { adminLogin, clearActivity, getActivity, saveSettings, updateFriend, createCode, createFriend, deleteCode, deleteFriend, listCodes, listFriends, lockAdmin } from "@/lib/gate.functions";
+import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -118,6 +119,13 @@ function Admin() {
                 Last sign-in: {when(f.last_login)} · Last seen: {when(f.last_seen)}
                 {f.expires_at && <> · Expires: {when(f.expires_at)}</>}
               </div>
+              {f.device && (
+                <div className="mt-1 text-xs text-muted-foreground" title={f.user_agent ?? ""}>
+                  {f.online ? "Signed in on" : "Last device"}: {f.device}
+                  {f.location && <> · {f.location}</>}
+                  {f.ip && <> · IP {f.ip}</>}
+                </div>
+              )}
               <div className="mt-2 flex flex-wrap gap-2">
                 <button className={btn} onClick={() => { const n = prompt("New name", f.name); if (n !== null) edit(f.id, { name: n }); }}>rename</button>
                 <button className={btn} onClick={() => { const p = prompt("New password (leave empty for a random one)"); if (p !== null) edit(f.id, p.trim() ? { password: p } : { newRandom: true }); }}>change password</button>
@@ -128,7 +136,7 @@ function Admin() {
                   const days = Number(d);
                   edit(f.id, { expires_at: d.trim() && days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null });
                 }}>expiry</button>
-                {f.online && <button className={btn} onClick={async () => { await kick({ data: { id: f.id } }); await refresh(); }}>kick out</button>}
+                {f.online && <button className={btn} onClick={async () => { try { await kick({ data: { id: f.id } }); } catch (e) { alert((e as Error).message); } await refresh(); }}>kick out</button>}
                 <button className={btn} onClick={async () => { if (confirm("Delete this password?")) { await removeFriend({ data: { id: f.id } }); await refresh(); } }}>delete</button>
               </div>
             </li>

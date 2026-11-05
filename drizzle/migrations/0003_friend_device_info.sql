@@ -1,0 +1,1 @@
+ALTER TABLE public.friend_passwords ADD COLUMN IF NOT EXISTS device text, ADD COLUMN IF NOT EXISTS ip text, ADD COLUMN IF NOT EXISTS location text, ADD COLUMN IF NOT EXISTS user_agent text;
