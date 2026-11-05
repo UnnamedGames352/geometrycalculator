@@ -22,9 +22,15 @@ export async function getSettings(): Promise<SiteSettings> {
   return data ?? { lockdown: false, hidden_games: [], kick_all_at: null };
 }
 
+// Every log entry also records which computer it came from.
 export async function logActivity(kind: string, detail = "") {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  await supabaseAdmin.from("activity_log").insert({ kind, detail: detail.slice(0, 80) });
+  let extra = "";
+  try {
+    const d = await deviceInfo();
+    extra = ` — ${[d.device, d.location, d.ip && `IP ${d.ip}`].filter(Boolean).join(" · ")}`;
+  } catch { /* no request */ }
+  await supabaseAdmin.from("activity_log").insert({ kind, detail: (detail.slice(0, 80) + extra).slice(0, 300) });
 }
 
 /** markSeen: update the friend's "last seen" time (done on hub loads, not every game file). */
@@ -56,3 +62,14 @@ export function passwordMatches(input: string, expected: string) {
   const b = createHash("sha256").update(expected, "utf8").digest();
   return timingSafeEqual(a, b);
 }
+
+export async function deviceInfo() {
+  const { getRequestHeader } = await import("@tanstack/react-start/server");
+  const ua = getRequestHeader("user-agent") ?? "";
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Firefox|FxiOS/.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Unknown browser";
+  const os = /CrOS/.test(ua) ? "Chromebook" : /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? (/Mobile/.test(ua) ? "Android phone" : "Android tablet") : /Windows/.test(ua) ? "Windows PC" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Unknown device";
+  const ip = getRequestHeader("cf-connecting-ip") ?? getRequestHeader("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+  const loc = [getRequestHeader("cf-ipcity"), getRequestHeader("cf-region"), getRequestHeader("cf-ipcountry")].filter(Boolean).join(", ");
+  return { device: `${browser} on ${os}`, ip, location: loc || null, user_agent: ua.slice(0, 300) };
+}
+
