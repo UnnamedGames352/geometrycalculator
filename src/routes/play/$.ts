@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { tabDisguiseScript } from "@/lib/tab-disguise";
 
 // Streams game files straight from the user's GitHub repos (default branch)
 // through this domain, so games work even where github.io is blocked.
@@ -53,7 +54,8 @@ export const Route = createFileRoute("/play/$")({
           const { guardScript, setCurrentGame } = await import("@/lib/gate.server");
           if (file === "index.html") await setCurrentGame(repo);
           const html = await upstream.text();
-          const out = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + guardScript) : guardScript + html;
+          const scripts = `${tabDisguiseScript}${guardScript}`;
+          const out = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + scripts) : scripts + html;
           headers.set("cache-control", "no-store");
           return new Response(out, { status: 200, headers });
         }
