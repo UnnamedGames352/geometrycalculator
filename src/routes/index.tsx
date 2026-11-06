@@ -39,6 +39,14 @@ function Index() {
     }, 3000);
     return () => clearInterval(id);
   }, [unlocked, tabOk]);
+  // Tab disguise: looks like a Google Docs tab while the hub is open.
+  useEffect(() => {
+    if (!unlocked || !tabOk) return;
+    document.title = "Untitled document - Google Docs";
+    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+    if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+    link.href = "https://ssl.gstatic.com/docs/documents/images/kix-favicon7.ico";
+  }, [unlocked, tabOk]);
   if (unlocked && tabOk === null) return null;
   if (unlocked && tabOk) {
     return <iframe src="/hub" title="UnnamedGamesHub" className="fixed inset-0 h-full w-full border-0" />;
@@ -56,7 +64,7 @@ function FakeError() {
     e.preventDefault();
     const code = new FormData(e.currentTarget).get("code") as string;
     const { ok } = await unlock({ data: { code } });
-    if (ok) { sessionStorage.setItem("gate-tab", "1"); await router.invalidate(); }
+    if (ok) { sessionStorage.setItem("gate-tab", "1"); sessionStorage.setItem("last-active", String(Date.now())); await router.invalidate(); }
     else await router.navigate({ to: "/geometry" });
   }
 

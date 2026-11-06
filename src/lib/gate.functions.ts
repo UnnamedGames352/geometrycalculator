@@ -10,6 +10,10 @@ export const redeemCode = createServerFn({ method: "POST" })
   .inputValidator((d: { code: string }) => ({ code: String(d?.code ?? "").trim().toUpperCase().slice(0, 40) }))
   .handler(async ({ data }) => {
     if (!data.code) return { ok: false as const };
+    if (await (await import("./gate.server")).isBanned()) {
+      await (await import("./gate.server")).logActivity("blocked", `Banned computer tried: ${data.code}`);
+      return { ok: false as const };
+    }
     const { getGateSession } = await import("./gate.server");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rows } = await supabaseAdmin.from("access_codes").delete().eq("code", data.code).select("code");
@@ -37,14 +41,14 @@ export const redeemCode = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-type Friend = { id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null };
+type Friend = { id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null };
 
 export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
   if (!(await getGateSession()).data.admin) return { friends: [] as Friend[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
-  return { friends: (data ?? []).map((f): Friend => ({ id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent })) };
+  return { friends: (data ?? []).map((f): Friend => ({ id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message })) };
 });
 
 export const createFriend = createServerFn({ method: "POST" })
@@ -210,5 +214,33 @@ export const saveSettings = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("site_settings").upsert(next);
     if (data.kickAll) await supabaseAdmin.from("friend_passwords").update({ active_session: null }).not("id", "is", null);
+    return { ok: true };
+  });
+
+export const messageFriend = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? ""), message: String(d?.message ?? "").trim().slice(0, 300) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
+    return { ok: true };
+  });
+
+export const listBans = createServerFn({ method: "GET" }).handler(async () => {
+  const { getGateSession } = await import("./gate.server");
+  if (!(await getGateSession()).data.admin) return { bans: [] as { ip: string; note: string }[] };
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("banned_ips").select("ip, note").order("created_at", { ascending: false });
+  return { bans: data ?? [] };
+});
+
+export const setBan = createServerFn({ method: "POST" })
+  .inputValidator((d: { ip: string; note?: string; banned: boolean }) => ({ ip: String(d?.ip ?? "").trim().slice(0, 60), note: String(d?.note ?? "").slice(0, 60), banned: !!d?.banned }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    if (!data.ip) return { ok: false };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (data.banned) await supabaseAdmin.from("banned_ips").upsert({ ip: data.ip, note: data.note });
+    else await supabaseAdmin.from("banned_ips").delete().eq("ip", data.ip);
     return { ok: true };
   });

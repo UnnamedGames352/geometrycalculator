@@ -41,6 +41,7 @@ export async function isUnlocked(opts: { markSeen?: boolean } = {}) {
   const settings = await getSettings();
   if (settings.lockdown) return false;
   if (settings.kick_all_at && (s.data.at ?? 0) < new Date(settings.kick_all_at).getTime()) return false;
+  if (opts.markSeen && (await isBanned())) return false;
   if (!s.data.friendId) return true;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin
@@ -73,3 +74,42 @@ export async function deviceInfo() {
   return { device: `${browser} on ${os}`, ip, location: loc || null, user_agent: ua.slice(0, 300) };
 }
 
+
+export async function isBanned() {
+  const { ip } = await deviceInfo();
+  if (!ip) return false;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("banned_ips").select("ip").eq("ip", ip).maybeSingle();
+  return !!data;
+}
+
+/** Live view: remember which game a signed-in friend is on (null = on the hub). */
+export async function setCurrentGame(repo: string | null) {
+  const s = await getGateSession();
+  if (!s.data.friendId || s.data.admin) return;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("friend_passwords").select("current_game").eq("id", s.data.friendId).maybeSingle();
+  if (data && data.current_game !== repo)
+    await supabaseAdmin.from("friend_passwords").update({ current_game: repo, game_started_at: new Date().toISOString() }).eq("id", s.data.friendId);
+}
+
+/** Pending note from the admin for this friend; ack clears it. */
+export async function takeMessage(ack: boolean) {
+  const s = await getGateSession();
+  if (!s.data.friendId) return null;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  if (ack) { await supabaseAdmin.from("friend_passwords").update({ message: null }).eq("id", s.data.friendId); return null; }
+  const { data } = await supabaseAdmin.from("friend_passwords").select("message").eq("id", s.data.friendId).maybeSingle();
+  return data?.message ?? null;
+}
+
+// Injected into the hub and every game page: kick check, admin notes,
+// panic key (Esc twice -> geometry page) and 15-minute idle lock.
+export const guardScript = `<script>(()=>{const T=window.top,go=u=>{try{T.sessionStorage.removeItem('gate-tab')}catch{}T.location.replace(u)};
+const touch=()=>{try{T.sessionStorage.setItem('last-active',Date.now())}catch{}};touch();
+['mousemove','mousedown','keydown','touchstart','wheel'].forEach(e=>addEventListener(e,touch,{passive:true,capture:true}));
+let last=0;addEventListener('keydown',e=>{if(e.key==='Escape'){const n=Date.now();if(n-last<700)go('/geometry');last=n}},true);
+let busy=false;const check=async()=>{if(busy)return;busy=true;try{const a=+T.sessionStorage.getItem('last-active')||Date.now();if(Date.now()-a>900000){go('/');return}
+const r=await fetch('/hub?session-check=1',{cache:'no-store',credentials:'same-origin'});const s=await r.json();if(!s.unlocked){go('/');return}
+if(s.message&&window===T.frames[0]){alert(s.message);await fetch('/hub?session-check=1&ack=1',{cache:'no-store'})}}catch{}finally{busy=false}};
+void check();setInterval(check,2000)})()</script>`;
