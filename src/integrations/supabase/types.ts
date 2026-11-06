@@ -50,17 +50,38 @@ export type Database = {
         }
         Relationships: []
       }
+      banned_ips: {
+        Row: {
+          created_at: string
+          ip: string
+          note: string
+        }
+        Insert: {
+          created_at?: string
+          ip: string
+          note?: string
+        }
+        Update: {
+          created_at?: string
+          ip?: string
+          note?: string
+        }
+        Relationships: []
+      }
       friend_passwords: {
         Row: {
           active_session: string | null
           created_at: string
+          current_game: string | null
           device: string | null
           expires_at: string | null
+          game_started_at: string | null
           id: string
           ip: string | null
           last_login: string | null
           last_seen: string | null
           location: string | null
+          message: string | null
           name: string
           password: string
           paused: boolean
@@ -69,13 +90,16 @@ export type Database = {
         Insert: {
           active_session?: string | null
           created_at?: string
+          current_game?: string | null
           device?: string | null
           expires_at?: string | null
+          game_started_at?: string | null
           id?: string
           ip?: string | null
           last_login?: string | null
           last_seen?: string | null
           location?: string | null
+          message?: string | null
           name?: string
           password: string
           paused?: boolean
@@ -84,13 +108,16 @@ export type Database = {
         Update: {
           active_session?: string | null
           created_at?: string
+          current_game?: string | null
           device?: string | null
           expires_at?: string | null
+          game_started_at?: string | null
           id?: string
           ip?: string | null
           last_login?: string | null
           last_seen?: string | null
           location?: string | null
+          message?: string | null
           name?: string
           password?: string
           paused?: boolean
