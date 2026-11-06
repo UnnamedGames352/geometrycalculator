@@ -1,10 +1,15 @@
 import { useSession } from "@tanstack/react-start/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 
-// friendId/token are set when a friend signs in with a personal password;
-// only the most recent sign-in token for that password stays valid.
-// at = when this browser was unlocked (used by "kick everyone").
-type GateSession = { unlocked?: boolean; admin?: boolean; friendId?: string | undefined; token?: string | undefined; at?: number };
+// The device ID is a random browser-local identifier, not a hardware serial number.
+type GateSession = {
+  unlocked?: boolean;
+  admin?: boolean;
+  friendId?: string | undefined;
+  token?: string | undefined;
+  deviceId?: string | undefined;
+  at?: number;
+};
 
 const config = () => ({
   password: process.env["SESSION_SECRET"]!,
@@ -22,13 +27,14 @@ export async function getSettings(): Promise<SiteSettings> {
   return data ?? { lockdown: false, hidden_games: [], kick_all_at: null };
 }
 
-// Every log entry also records which computer it came from.
+// Every activity entry includes the browser ID when one has been assigned, so an
+// admin can copy it into the device-ban manager. IPs remain diagnostic only.
 export async function logActivity(kind: string, detail = "") {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   let extra = "";
   try {
-    const d = await deviceInfo();
-    extra = ` — ${[d.device, d.location, d.ip && `IP ${d.ip}`].filter(Boolean).join(" · ")}`;
+    const [d, session] = await Promise.all([deviceInfo(), getGateSession()]);
+    extra = ` — ${[d.device, d.location, d.ip && `IP ${d.ip}`, session.data.deviceId && `Device ID ${session.data.deviceId}`].filter(Boolean).join(" · ")}`;
   } catch { /* no request */ }
   await supabaseAdmin.from("activity_log").insert({ kind, detail: (detail.slice(0, 80) + extra).slice(0, 300) });
 }
@@ -41,7 +47,7 @@ export async function isUnlocked(opts: { markSeen?: boolean } = {}) {
   const settings = await getSettings();
   if (settings.lockdown) return false;
   if (settings.kick_all_at && (s.data.at ?? 0) < new Date(settings.kick_all_at).getTime()) return false;
-  if (opts.markSeen && (await isBanned())) return false;
+  if (s.data.deviceId && await isDeviceBanned(s.data.deviceId)) return false;
   if (!s.data.friendId) return true;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin
@@ -74,13 +80,18 @@ export async function deviceInfo() {
   return { device: `${browser} on ${os}`, ip, location: loc || null, user_agent: ua.slice(0, 300) };
 }
 
-
-export async function isBanned() {
-  const { ip } = await deviceInfo();
-  if (!ip) return false;
+export async function isDeviceBanned(deviceId: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)) return false;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("banned_ips").select("ip").eq("ip", ip).maybeSingle();
+  const db = supabaseAdmin as unknown as { from: (table: string) => any };
+  const { data } = await db.from("banned_devices").select("device_id").eq("device_id", deviceId).maybeSingle();
   return !!data;
+}
+
+// Compatibility for older callers; bans are now checked using the browser ID in session.
+export async function isBanned() {
+  const session = await getGateSession();
+  return session.data.deviceId ? isDeviceBanned(session.data.deviceId) : false;
 }
 
 /** Live view: remember which game a signed-in friend is on (null = on the hub). */
