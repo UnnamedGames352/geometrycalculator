@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { adminLogin, clearActivity, getActivity, saveSettings, updateFriend, createCode, createFriend, deleteCode, deleteFriend, listCodes, listFriends, lockAdmin } from "@/lib/gate.functions";
+import { adminLogin, clearActivity, getActivity, saveSettings, updateFriend, createCode, createFriend, deleteCode, deleteFriend, listCodes, listFriends, lockAdmin, listBans, setBan, messageFriend } from "@/lib/gate.functions";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
@@ -16,15 +16,19 @@ export const Route = createFileRoute("/admin")({
       { name: "robots", content: "noindex" },
     ],
   }),
-  loader: async () => ({ ...(await listCodes()), ...(await listFriends()), ...(await getActivity()) }),
+  loader: async () => ({ ...(await listCodes()), ...(await listFriends()), ...(await getActivity()), ...(await listBans()) }),
   component: Admin,
 });
 
 const when = (t: string | null) => (t ? new Date(t).toLocaleString() : "never");
+const mins = (t: string) => { const m = Math.floor((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? "under a minute" : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 const btn = "rounded border border-border px-2 py-1 text-xs";
 
 function Admin() {
-  const { admin, codes, friends, log, settings } = Route.useLoaderData();
+  const { admin, codes, friends, log, settings, bans } = Route.useLoaderData();
+  const ban = useServerFn(setBan);
+  const note = useServerFn(messageFriend);
+  const [banIp, setBanIp] = useState("");
   const addFriend = useServerFn(createFriend);
   const removeFriend = useServerFn(deleteFriend);
   const kick = useServerFn(kickFriend);
@@ -45,6 +49,13 @@ function Admin() {
     setTabOk(ok);
     if (admin && !ok) lock().then(() => router.invalidate());
   }, [admin]);
+
+  // Live view: refresh every 5 seconds.
+  useEffect(() => {
+    if (!admin || !tabOk) return;
+    const id = setInterval(() => router.invalidate(), 5000);
+    return () => clearInterval(id);
+  }, [admin, tabOk]);
 
   if (admin && tabOk === null) return null;
   if (!admin || !tabOk) {
@@ -119,6 +130,13 @@ function Admin() {
                 Last sign-in: {when(f.last_login)} · Last seen: {when(f.last_seen)}
                 {f.expires_at && <> · Expires: {when(f.expires_at)}</>}
               </div>
+              {f.online && !f.paused && !expired && (
+                <div className="mt-1 text-sm">
+                  {f.current_game ? <>Playing <b>{f.current_game}</b></> : "On the games list"}
+                  {f.game_started_at && <span className="text-xs text-muted-foreground"> · for {mins(f.game_started_at)}</span>}
+                </div>
+              )}
+              {f.message && <div className="mt-1 text-xs text-muted-foreground">Note waiting to be seen: “{f.message}”</div>}
               {f.device && (
                 <div className="mt-1 text-xs text-muted-foreground" title={f.user_agent ?? ""}>
                   {f.online ? "Signed in on" : "Last device"}: {f.device}
@@ -136,12 +154,31 @@ function Admin() {
                   const days = Number(d);
                   edit(f.id, { expires_at: d.trim() && days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null });
                 }}>expiry</button>
+                <button className={btn} onClick={async () => { const m = prompt(`Message to ${f.name}`); if (m?.trim()) { await note({ data: { id: f.id, message: m } }); await refresh(); } }}>message</button>
+                {f.ip && <button className={btn} onClick={async () => { if (confirm(`Ban this computer (IP ${f.ip})?`)) { await ban({ data: { ip: f.ip!, note: f.name, banned: true } }); await refresh(); } }}>ban computer</button>}
                 {f.online && <button className={btn} onClick={async () => { try { await kick({ data: { id: f.id } }); } catch (e) { alert((e as Error).message); } await refresh(); }}>kick out</button>}
                 <button className={btn} onClick={async () => { if (confirm("Delete this password?")) { await removeFriend({ data: { id: f.id } }); await refresh(); } }}>delete</button>
               </div>
             </li>
           );
         })}
+      </ul>
+
+      <h2 className="mt-10 text-xl font-bold">Banned computers</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Banned IP addresses can't sign in and get kicked out. Find IPs in the activity list.</p>
+      <form className="mt-3 flex gap-2" onSubmit={async (e) => { e.preventDefault(); await ban({ data: { ip: banIp, banned: true } }); setBanIp(""); await refresh(); }}>
+        <input value={banIp} onChange={(e) => setBanIp(e.target.value)} placeholder="IP address"
+          className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm" />
+        <button type="submit" className="rounded bg-primary px-4 py-2 text-primary-foreground">Ban</button>
+      </form>
+      <ul className="mt-3 space-y-2">
+        {bans.length === 0 && <li className="text-sm text-muted-foreground">Nobody banned.</li>}
+        {bans.map((b) => (
+          <li key={b.ip} className="flex items-center justify-between rounded border border-border px-3 py-2 text-sm">
+            <span className="font-mono">{b.ip}{b.note && <span className="ml-2 font-sans text-muted-foreground">({b.note})</span>}</span>
+            <button className={btn} onClick={async () => { await ban({ data: { ip: b.ip, banned: false } }); await refresh(); }}>unban</button>
+          </li>
+        ))}
       </ul>
 
       <div className="mt-10 flex items-center justify-between">
