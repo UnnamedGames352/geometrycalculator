@@ -49,6 +49,14 @@ export const Route = createFileRoute("/play/$")({
           "content-type": TYPES[ext] ?? "application/octet-stream",
           "cache-control": "public, max-age=86400",
         });
+        if (ext === "html" || ext === "htm") {
+          const { guardScript, setCurrentGame } = await import("@/lib/gate.server");
+          if (file === "index.html") await setCurrentGame(repo);
+          const html = await upstream.text();
+          const out = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + guardScript) : guardScript + html;
+          headers.set("cache-control", "no-store");
+          return new Response(out, { status: 200, headers });
+        }
         // No content-length: upstream may be gzip and fetch decompresses it.
         return new Response(upstream.body, { status: 200, headers });
       },
