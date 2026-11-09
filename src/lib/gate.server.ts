@@ -46,7 +46,7 @@ export async function logActivity(kind: string, detail = "", deviceId?: string, 
 
 export async function evictUsers(lockdown?: boolean) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { error } = await supabaseAdmin.rpc("evict_gate_users", { p_lockdown: lockdown });
+  const { error } = await supabaseAdmin.rpc("evict_gate_users", lockdown === undefined ? {} : { p_lockdown: lockdown });
   if (error) throw new Error("Could not evict sessions");
 }
 
