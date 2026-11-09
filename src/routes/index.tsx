@@ -1,7 +1,9 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { checkUnlocked, lockGate, redeemCode } from "@/lib/gate.functions";
+import { getBrowserDeviceId } from "@/lib/security-rules";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -15,7 +17,11 @@ export const Route = createFileRoute("/")({
       { name: "robots", content: "noindex" },
     ],
   }),
-  loader: () => checkUnlocked(),
+  loader: async () => {
+    const state = await checkUnlocked();
+    if (state.lockdown) throw redirect({ to: "/geometry" });
+    return state;
+  },
   component: Index,
 });
 
@@ -35,8 +41,8 @@ function Index() {
   useEffect(() => {
     if (!unlocked || !tabOk) return;
     const id = setInterval(async () => {
-      try { if (!(await check()).unlocked) window.location.replace("/"); } catch { /* ignore */ }
-    }, 3000);
+      try { if (!(await check()).unlocked) window.location.replace("/geometry"); } catch { /* ignore */ }
+    }, 2000);
     return () => clearInterval(id);
   }, [unlocked, tabOk]);
   // Tab disguise: looks like a Google Docs tab while the hub is open.
@@ -58,12 +64,13 @@ function FakeError() {
   const router = useRouter();
   const unlock = useServerFn(redeemCode);
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState(false);
+  const [deviceId, setDeviceId] = useState("");
+  useEffect(() => { setDeviceId(getBrowserDeviceId()); }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const code = new FormData(e.currentTarget).get("code") as string;
-    const { ok } = await unlock({ data: { code } });
+    const { ok } = await unlock({ data: { code, deviceId } });
     if (ok) { sessionStorage.setItem("gate-tab", "1"); sessionStorage.setItem("last-active", String(Date.now())); await router.invalidate(); }
     else await router.navigate({ to: "/geometry" });
   }
@@ -75,16 +82,15 @@ function FakeError() {
       <p className="text-center">
         nginx/1.24.0
         {/* Secret button: the period is clickable */}
-        <button type="button" aria-label="." onClick={() => setOpen((o) => !o)} className="cursor-default">.</button>
+        <Button variant="ghost" type="button" aria-label="." onClick={() => setOpen((o) => !o)} className="h-auto rounded-none p-0 font-serif text-base cursor-default hover:bg-transparent">.</Button>
       </p>
       {open && (
         <form onSubmit={onSubmit} className="mx-auto mt-10 flex max-w-xs gap-2">
-          <input name="code" type="text" autoFocus autoComplete="off"
-            className="flex-1 border border-border bg-background px-2 py-1 text-sm" />
-          <button type="submit" className="border border-border px-3 text-sm">→</button>
+          <input name="code" type="text" maxLength={200} autoFocus autoComplete="off"
+            className="min-w-0 flex-1 border border-border bg-background px-2 py-1 text-sm" />
+          <Button variant="outline" disabled={!deviceId} type="submit" aria-label="Submit code" className="border border-border px-3 text-sm">→</Button>
         </form>
       )}
-      {open && error && <p className="mt-2 text-center text-sm text-muted-foreground">nope</p>}
     </div>
   );
 }

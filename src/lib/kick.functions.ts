@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 
 async function requireAdmin() {
   const { getGateSession } = await import("./gate.server");
-  if (!(await getGateSession()).data.admin) throw new Error("Not Found");
+  if (!(await (await import("./gate.server")).isAdmin())) throw new Error("Not Found");
 }
 
 export const kickFriend = createServerFn({ method: "POST" })
