@@ -1,8 +1,11 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   adminLogin,
+  checkAdminAccess,
+  checkAdminAccessServer,
+  globalPanic,
   clearActivity,
   getActivity,
   saveSettings,
@@ -18,26 +21,29 @@ import {
   setBan,
   messageFriend,
 } from "@/lib/gate.functions";
+import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN } from "@/lib/security-rules";
+import { Button } from "@/components/ui/button";
+import { Copy, Ban } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
-      { title: "404 Not Found" },
+      { title: "Resource Administration | Geometry Resources" },
       { name: "description", content: "The requested page could not be found." },
-      { property: "og:title", content: "404 Not Found" },
+      { property: "og:title", content: "Resource Administration | Geometry Resources" },
       { property: "og:description", content: "The requested page could not be found." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "robots", content: "noindex" },
     ],
   }),
-  loader: async () => ({
-    ...(await listCodes()),
-    ...(await listFriends()),
-    ...(await getActivity()),
-    ...(await listBans()),
-  }),
+  loader: async () => {
+    const { allowed } = await checkAdminAccessServer();
+    if (!allowed) throw redirect({ to: "/geometry" });
+    const [codes, friends, activity, bans] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans()]);
+    return { ...codes, ...friends, ...activity, ...bans };
+  },
   component: Admin,
 });
 
@@ -52,6 +58,9 @@ const onlineWindowMs = 2 * 60_000;
 function Admin() {
   const { admin, codes, friends, log, settings, bans } = Route.useLoaderData();
   const ban = useServerFn(setBan);
+  const panic = useServerFn(globalPanic);
+  const access = useServerFn(checkAdminAccess);
+  const [accessOk, setAccessOk] = useState(false);
   const note = useServerFn(messageFriend);
   const addFriend = useServerFn(createFriend);
   const removeFriend = useServerFn(deleteFriend);
@@ -63,9 +72,16 @@ function Admin() {
   const removeCode = useServerFn(deleteCode);
   const lock = useServerFn(lockAdmin);
   const [friendName, setFriendName] = useState("");
-  const [banIp, setBanIp] = useState("");
+  const [banId, setBanId] = useState("");
   const [tabOk, setTabOk] = useState<boolean | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    access({ data: { deviceId: getBrowserDeviceId() } }).then(result => {
+      if (!result.allowed) void router.navigate({ to: "/geometry" });
+      else setAccessOk(true);
+    });
+  }, []);
 
   useEffect(() => {
     const ok = sessionStorage.getItem("admin-tab") === "1";
@@ -80,14 +96,12 @@ function Admin() {
     return () => clearInterval(id);
   }, [admin, tabOk]);
 
+  if (!accessOk) return null;
   if (admin && tabOk === null) return null;
   if (!admin || !tabOk) return <AdminGate />;
 
   const refresh = () => router.invalidate();
-  const onlineFriends = friends.filter((f) => {
-    if (!f.online || f.paused || (f.expires_at && new Date(f.expires_at) < new Date())) return false;
-    return !!f.last_seen && Date.now() - new Date(f.last_seen).getTime() < onlineWindowMs;
-  });
+  const onlineFriends = friends.filter((f) => isFriendOnline(f, Date.now()));
   const playingFriends = onlineFriends.filter((f) => f.current_game);
   const hubFriends = onlineFriends.filter((f) => !f.current_game);
 
@@ -105,19 +119,21 @@ function Admin() {
           <h1 className="mt-1 text-3xl font-bold">Site controls</h1>
           <p className="mt-1 text-sm text-muted-foreground">Activity refreshes every 5 seconds.</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs font-medium ${settings.lockdown ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}>
+        <span className={`rounded-full px-3 py-1 text-xs font-medium ${settings.lockdown ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
           {settings.lockdown ? "Lockdown on" : "Site open"}
         </span>
       </header>
 
+      <Button variant="destructive" className="mt-5 h-auto whitespace-normal py-3" onClick={async () => { await panic(); await refresh(); }}>Global Panic (Kick All to Geometry)</Button>
+
       <section aria-label="Live site statistics" className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Friends online" value={onlineFriends.length} detail="Active in the last 2 minutes" accent="text-emerald-600 dark:text-emerald-400" />
-        <StatCard label="Playing now" value={playingFriends.length} detail="Friends currently in a game" accent="text-violet-600 dark:text-violet-400" />
-        <StatCard label="On the hub" value={hubFriends.length} detail="Online, not in a game" accent="text-sky-600 dark:text-sky-400" />
-        <StatCard label="Unused codes" value={codes.length} detail="One-time codes ready to use" accent="text-amber-600 dark:text-amber-400" />
+        <StatCard label="Friends online" value={onlineFriends.length} detail="Active in the last 2 minutes" accent="text-success" />
+        <StatCard label="Playing now" value={playingFriends.length} detail="Friends currently in a game" accent="text-chart-3" />
+        <StatCard label="On the hub" value={hubFriends.length} detail="Online, not in a game" accent="text-chart-2" />
+        <StatCard label="Unused codes" value={codes.length} detail="One-time codes ready to use" accent="text-chart-1" />
       </section>
 
-      <section className="mt-6 rounded-xl border border-border p-4 sm:p-5">
+      <section className="mt-6 border-t border-border py-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-lg font-semibold">Friends online now</h2>
@@ -144,6 +160,7 @@ function Admin() {
                 <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                   <p><span className="font-medium text-foreground">Device:</span> {f.device || "Not reported"}</p>
                   {f.location && <p><span className="font-medium text-foreground">Location:</span> {f.location}</p>}
+                  {f.device_id && <DeviceControls id={f.device_id} onBan={async () => { await ban({ data: { deviceId: f.device_id ?? "", note: f.name, banned: true } }); await refresh(); }} />}
                   <p><span className="font-medium text-foreground">Last seen:</span> {when(f.last_seen)}</p>
                 </div>
               </li>
@@ -156,11 +173,11 @@ function Admin() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">Lockdown {settings.lockdown ? "ON" : "off"}</h2>
-            <p className="text-xs text-muted-foreground">When on, everyone except you sees the fake 404.</p>
+            <p className="text-xs text-muted-foreground">When on, all players are sent to geometry.</p>
           </div>
-          <button className={btn} onClick={async () => { await save({ data: { lockdown: !settings.lockdown } }); await refresh(); }}>
+          <Button variant="outline" size="sm" className={btn} onClick={async () => { await save({ data: { lockdown: !settings.lockdown } }); await refresh(); }}>
             {settings.lockdown ? "Turn off" : "Turn on"}
-          </button>
+          </Button>
         </div>
       </section>
       <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border p-4">
@@ -168,19 +185,19 @@ function Admin() {
           <h2 className="font-semibold">Kick everyone</h2>
           <p className="text-xs text-muted-foreground">Signs out every friend and code user right now.</p>
         </div>
-        <button className={btn} onClick={async () => { if (confirm("Kick everyone out?")) { await save({ data: { kickAll: true } }); await refresh(); } }}>Kick all</button>
+        <Button variant="outline" size="sm" className={btn} onClick={async () => { if (confirm("Kick everyone out?")) { await save({ data: { kickAll: true } }); await refresh(); } }}>Kick all</Button>
       </div>
 
       <section className="mt-8">
         <h2 className="text-xl font-bold">One-time codes</h2>
         <p className="mt-1 text-sm text-muted-foreground">Each code works once, then disappears.</p>
-        <button className="mt-3 rounded bg-primary px-4 py-2 text-sm text-primary-foreground" onClick={async () => { await make(); await refresh(); }}>Make a new code</button>
+        <Button variant="outline" size="sm" className="mt-3 rounded bg-primary px-4 py-2 text-sm text-primary-foreground" onClick={async () => { await make(); await refresh(); }}>Make a new code</Button>
         <ul className="mt-4 space-y-2">
           {codes.length === 0 && <li className="text-sm text-muted-foreground">No unused codes.</li>}
           {codes.map((code) => (
             <li key={code} className="flex items-center justify-between rounded border border-border px-3 py-2 font-mono">
               {code}
-              <button className={btn} onClick={async () => { await removeCode({ data: { code } }); await refresh(); }}>delete</button>
+              <Button variant="outline" size="sm" className={btn} onClick={async () => { await removeCode({ data: { code } }); await refresh(); }}>delete</Button>
             </li>
           ))}
         </ul>
@@ -191,7 +208,7 @@ function Admin() {
         <p className="mt-1 text-sm text-muted-foreground">Reusable, but only one device at a time. Signing in somewhere new kicks out the old one.</p>
         <form className="mt-3 flex gap-2" onSubmit={async (event) => { event.preventDefault(); await addFriend({ data: { name: friendName } }); setFriendName(""); await refresh(); }}>
           <input value={friendName} onChange={(event) => setFriendName(event.target.value)} placeholder="Friend's name" className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm" />
-          <button type="submit" className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground">Add</button>
+          <Button variant="outline" size="sm" type="submit" className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground">Add</Button>
         </form>
         <ul className="mt-4 space-y-3">
           {friends.length === 0 && <li className="text-sm text-muted-foreground">No friend passwords yet.</li>}
@@ -210,14 +227,14 @@ function Admin() {
                 {f.message && <div className="mt-1 text-xs text-muted-foreground">Note waiting to be seen: “{f.message}”</div>}
                 {f.device && <div className="mt-1 text-xs text-muted-foreground" title={f.user_agent ?? ""}>{active ? "Signed in on" : "Last device"}: {f.device}{f.location && <> · {f.location}</>}{f.ip && <> · IP {f.ip}</>}</div>}
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button className={btn} onClick={() => { const name = prompt("New name", f.name); if (name !== null) void edit(f.id, { name }); }}>rename</button>
-                  <button className={btn} onClick={() => { const password = prompt("New password (leave empty for a random one)"); if (password !== null) void edit(f.id, password.trim() ? { password } : { newRandom: true }); }}>change password</button>
-                  <button className={btn} onClick={() => void edit(f.id, { paused: !f.paused })}>{f.paused ? "unpause" : "pause"}</button>
-                  <button className={btn} onClick={() => { const daysText = prompt("Expire after how many days? (empty = never)", ""); if (daysText === null) return; const days = Number(daysText); void edit(f.id, { expires_at: daysText.trim() && days > 0 ? new Date(Date.now() + days * 86_400_000).toISOString() : null }); }}>expiry</button>
-                  <button className={btn} onClick={async () => { const message = prompt(`Message to ${f.name}`); if (message?.trim()) { await note({ data: { id: f.id, message } }); await refresh(); } }}>message</button>
-                  {f.ip && <button className={btn} onClick={async () => { if (confirm(`Ban this computer's IP (${f.ip})? This can affect others on shared Wi-Fi.`)) { await ban({ data: { ip: f.ip!, note: f.name, banned: true } }); await refresh(); } }}>ban IP</button>}
-                  {f.online && <button className={btn} onClick={async () => { try { await kick({ data: { id: f.id } }); } catch (error) { alert((error as Error).message); } await refresh(); }}>kick out</button>}
-                  <button className={btn} onClick={async () => { if (confirm("Delete this password?")) { await removeFriend({ data: { id: f.id } }); await refresh(); } }}>delete</button>
+                  <Button variant="outline" size="sm" className={btn} onClick={() => { const name = prompt("New name", f.name); if (name !== null) void edit(f.id, { name }); }}>rename</Button>
+                  <Button variant="outline" size="sm" className={btn} onClick={() => { const password = prompt("New password (leave empty for a random one)"); if (password !== null) void edit(f.id, password.trim() ? { password } : { newRandom: true }); }}>change password</Button>
+                  <Button variant="outline" size="sm" className={btn} onClick={() => void edit(f.id, { paused: !f.paused })}>{f.paused ? "unpause" : "pause"}</Button>
+                  <Button variant="outline" size="sm" className={btn} onClick={() => { const daysText = prompt("Expire after how many days? (empty = never)", ""); if (daysText === null) return; const days = Number(daysText); void edit(f.id, { expires_at: daysText.trim() && days > 0 ? new Date(Date.now() + days * 86_400_000).toISOString() : null }); }}>expiry</Button>
+                  <Button variant="outline" size="sm" className={btn} onClick={async () => { const message = prompt(`Message to ${f.name}`); if (message?.trim()) { await note({ data: { id: f.id, message } }); await refresh(); } }}>message</Button>
+                  {f.device_id && <DeviceControls id={f.device_id} onBan={async () => { await ban({ data: { deviceId: f.device_id ?? "", note: f.name, banned: true } }); await refresh(); }} />}
+                  {f.online && <Button variant="outline" size="sm" className={btn} onClick={async () => { try { await kick({ data: { id: f.id } }); } catch (error) { alert((error as Error).message); } await refresh(); }}>kick out</Button>}
+                  <Button variant="outline" size="sm" className={btn} onClick={async () => { if (confirm("Delete this password?")) { await removeFriend({ data: { id: f.id } }); await refresh(); } }}>delete</Button>
                 </div>
               </li>
             );
@@ -226,18 +243,18 @@ function Admin() {
       </section>
 
       <section className="mt-8">
-        <h2 className="text-xl font-bold">Banned IP addresses</h2>
-        <p className="mt-1 text-sm text-muted-foreground">IP bans may affect everyone sharing the same school Wi-Fi. Device-specific bans are not connected yet.</p>
-        <form className="mt-3 flex gap-2" onSubmit={async (event) => { event.preventDefault(); const result = await ban({ data: { ip: banIp, banned: true } }); if (!result.ok) alert("Could not add that ban."); else setBanIp(""); await refresh(); }}>
-          <input value={banIp} onChange={(event) => setBanIp(event.target.value)} placeholder="IP address" className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm" />
-          <button type="submit" className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground">Ban</button>
+        <h2 className="text-xl font-bold">Banned Device IDs</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Browser bans do not block others sharing the same Wi-Fi. Clearing browser storage creates a new ID.</p>
+        <form className="mt-3 flex gap-2" onSubmit={async (event) => { event.preventDefault(); const result = await ban({ data: { deviceId: banId, banned: true } }); if (!result.ok) alert("Could not add that ban."); else setBanId(""); await refresh(); }}>
+          <input value={banId} onChange={(event) => setBanId(event.target.value)} placeholder="Browser UUID" pattern={DEVICE_ID_PATTERN.source} required className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm" />
+          <Button variant="outline" size="sm" type="submit" className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground">Ban</Button>
         </form>
         <ul className="mt-3 space-y-2">
           {bans.length === 0 && <li className="text-sm text-muted-foreground">Nobody banned.</li>}
           {bans.map((item) => (
-            <li key={item.ip} className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm">
-              <span className="break-all font-mono">{item.ip}{item.note && <span className="ml-2 font-sans text-muted-foreground">({item.note})</span>}</span>
-              <button className={btn} onClick={async () => { await ban({ data: { ip: item.ip, banned: false } }); await refresh(); }}>unban</button>
+            <li key={item.device_id} className="flex items-center justify-between gap-3 rounded border border-border px-3 py-2 text-sm">
+              <span className="break-all font-mono">{item.device_id}{item.note && <span className="ml-2 font-sans text-muted-foreground">({item.note})</span>}</span>
+              <Button variant="outline" size="sm" className={btn} onClick={async () => { await ban({ data: { deviceId: item.device_id, banned: false } }); await refresh(); }}>unban</Button>
             </li>
           ))}
         </ul>
@@ -246,17 +263,24 @@ function Admin() {
       <section className="mt-8">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold">Recent activity</h2>
-          <button className={btn} onClick={async () => { if (confirm("Clear the activity list?")) { await clearLog(); await refresh(); } }}>clear</button>
+          <Button variant="outline" size="sm" className={btn} onClick={async () => { if (confirm("Clear the activity list?")) { await clearLog(); await refresh(); } }}>clear</Button>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">Most recent 50 entries.</p>
         <ul className="mt-3 space-y-1 text-sm">
           {log.length === 0 && <li className="text-muted-foreground">Nothing yet.</li>}
-          {log.map((entry, index) => (
-            <li key={`${entry.at}-${index}`} className={`flex justify-between gap-3 border-b border-border py-2 ${entry.kind === "wrong" || entry.kind === "blocked" ? "text-destructive" : ""}`}>
-              <span className="min-w-0 break-words">{entry.detail}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">{when(entry.at)}</span>
-            </li>
-          ))}
+          {log.map((entry, index) => {
+            const failure = ["wrong","admin_wrong","blocked","tripwire"].includes(entry.kind);
+            const success = ["code","login","admin_login"].includes(entry.kind);
+            return <li key={`${entry.at}-${index}`} className="flex flex-wrap justify-between gap-2 border-b border-border py-3">
+              <div className="min-w-0 flex-1 basis-64 space-y-2 break-words">
+                <span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${failure ? "bg-destructive/10 text-destructive" : success ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>{failure ? "Failed / blocked" : success ? "Success" : entry.kind}</span>
+                <p>{entry.detail}</p>
+                {entry.attempted_input !== null && <p className="break-all font-mono text-xs">Entered: {entry.attempted_input || "(empty)"}</p>}
+                {entry.device_id && <DeviceControls id={entry.device_id} onBan={async () => { await ban({ data: { deviceId: entry.device_id ?? "", note: "Activity review", banned: true } }); await refresh(); }} />}
+              </div>
+              <time className="text-xs text-muted-foreground">{when(entry.at)}</time>
+            </li>;
+          })}
         </ul>
       </section>
     </main>
@@ -265,7 +289,7 @@ function Admin() {
 
 function StatCard({ label, value, detail, accent }: { label: string; value: number; detail: string; accent: string }) {
   return (
-    <article className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+    <article className="rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5">
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className={`mt-2 text-3xl font-bold tabular-nums ${accent}`}>{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
@@ -277,13 +301,16 @@ function AdminGate() {
   const router = useRouter();
   const login = useServerFn(adminLogin);
   const [open, setOpen] = useState(false);
+  const [deviceId, setDeviceId] = useState("");
+  useEffect(() => { setDeviceId(getBrowserDeviceId()); }, []);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const password = new FormData(event.currentTarget).get("password") as string;
-    const { ok } = await login({ data: { password } });
+    const { ok } = await login({ data: { password, deviceId } });
     if (ok) {
       sessionStorage.setItem("admin-tab", "1");
+      sessionStorage.setItem("gate-tab", "1");
       await router.invalidate();
     } else {
       await router.navigate({ to: "/geometry" });
@@ -297,14 +324,23 @@ function AdminGate() {
       <p className="text-center">
         nginx/1.24.0
         {/* Secret button: the period is clickable */}
-        <button type="button" aria-label="." onClick={() => setOpen((value) => !value)} className="cursor-default">.</button>
+        <Button variant="ghost" type="button" aria-label="." onClick={() => setOpen((value) => !value)} className="h-auto rounded-none p-0 font-serif text-base cursor-default hover:bg-transparent">.</Button>
       </p>
       {open && (
         <form onSubmit={onSubmit} className="mx-auto mt-10 flex max-w-xs gap-2">
-          <input name="password" type="password" autoFocus autoComplete="off" className="flex-1 border border-border bg-background px-2 py-1 text-sm" />
-          <button type="submit" className="border border-border px-3 text-sm">→</button>
+          <input name="password" type="password" maxLength={200} autoFocus autoComplete="off" className="min-w-0 flex-1 border border-border bg-background px-2 py-1 text-sm" />
+          <Button variant="outline" size="sm" type="submit" className="border border-border px-3 text-sm">→</Button>
         </form>
       )}
     </div>
   );
+}
+
+function DeviceControls({ id, onBan }: { id: string; onBan: () => Promise<void> }) {
+  const [copied, setCopied] = useState(false);
+  return <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs">
+    <code className="break-all">{id}</code>
+    <Button variant="ghost" size="icon" className="h-7 w-7" title={copied ? "Copied" : "Copy Device ID"} aria-label="Copy Device ID" onClick={async () => { await navigator.clipboard.writeText(id); setCopied(true); }}><Copy /></Button>
+    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Ban Device" aria-label="Ban Device" onClick={() => void onBan()}><Ban /></Button>
+  </div>;
 }
