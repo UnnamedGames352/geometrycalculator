@@ -1,54 +1,53 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { DEVICE_ID_PATTERN } from "./security-rules";
+const deviceIdSchema = z.string().regex(DEVICE_ID_PATTERN);
 
 export const checkUnlocked = createServerFn({ method: "GET" }).handler(async () => {
-  const { isUnlocked } = await import("./gate.server");
-  return { unlocked: await isUnlocked() };
+  const { isUnlocked, getSettings } = await import("./gate.server");
+  return { unlocked: await isUnlocked(), lockdown: (await getSettings()).lockdown };
 });
 
 // Visitors enter a single-use code; it is deleted the moment it's used.
 export const redeemCode = createServerFn({ method: "POST" })
-  .inputValidator((d: { code: string }) => ({ code: String(d?.code ?? "").trim().toUpperCase().slice(0, 40) }))
+  .inputValidator((d: { code: string; deviceId: string }) => z.object({ code: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
   .handler(async ({ data }) => {
-    if (!data.code) return { ok: false as const };
-    if (await (await import("./gate.server")).isBanned()) {
-      await (await import("./gate.server")).logActivity("blocked", `Banned computer tried: ${data.code}`);
-      return { ok: false as const };
-    }
-    const { getGateSession } = await import("./gate.server");
+    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo } = await import("./gate.server");
+    if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
+    if ((await getSettings()).lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
+    if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
+    const code = data.code.trim().toUpperCase();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rows } = await supabaseAdmin.from("access_codes").delete().eq("code", data.code).select("code");
     const s = await getGateSession();
-    const { logActivity, getSettings } = await import("./gate.server");
-    if ((await getSettings()).lockdown) return { ok: false as const };
+    const { data: rows, error } = await supabaseAdmin.from("access_codes").delete().eq("code", code).select("code");
+    if (error) throw new Error("Could not validate code");
     if (rows?.length) {
-      await s.update({ ...s.data, unlocked: true, friendId: undefined, token: undefined, at: Date.now() });
-      await logActivity("code", `One-time code ${data.code} used`);
+      await s.update({ unlocked: true, admin: false, deviceId: data.deviceId, friendId: undefined, token: undefined, at: Date.now() });
+      await logActivity("code", `One-time code ${code} used`, data.deviceId, data.code);
       return { ok: true as const };
     }
-    // Personal friend password: newest sign-in wins, older device gets kicked out.
-    const { data: friend } = await supabaseAdmin.from("friend_passwords").select("id, name, paused, expires_at").eq("password", data.code).maybeSingle();
-    if (!friend) { await logActivity("wrong", `Wrong password tried: ${data.code}`); return { ok: false as const }; }
-    if (friend.paused || (friend.expires_at && new Date(friend.expires_at) < new Date())) {
-      await logActivity("blocked", `${friend.name} tried to sign in (paused or expired)`);
-      return { ok: false as const };
+    const { data: friend, error: friendError } = await supabaseAdmin.from("friend_passwords").select("id,name,paused,expires_at").eq("password",code).maybeSingle();
+    if (friendError) throw new Error("Could not validate password");
+    if (!friend) { await failedAttempt("wrong",data.code,data.deviceId); return { ok: false as const }; }
+    if (friend.paused || (friend.expires_at && Date.parse(friend.expires_at) <= Date.now())) {
+      await logActivity("blocked", `${friend.name}: password paused or expired`,data.deviceId,data.code); return { ok: false as const };
     }
-    const { randomBytes } = await import("node:crypto");
-    const token = randomBytes(16).toString("hex");
-    await supabaseAdmin.from("friend_passwords")
-      .update({ active_session: token, last_login: new Date().toISOString(), ...(await (await import("./gate.server")).deviceInfo()) }).eq("id", friend.id);
-    await s.update({ ...s.data, unlocked: true, friendId: friend.id, token, at: Date.now() });
-    await logActivity("login", `${friend.name} signed in`);
+    const token = crypto.randomUUID();
+    const { error: updateError } = await supabaseAdmin.from("friend_passwords").update({ active_session: token, device_id: data.deviceId, last_login: new Date().toISOString(), last_seen: new Date().toISOString(), ...(await deviceInfo()) }).eq("id",friend.id);
+    if (updateError) throw new Error("Could not start friend session");
+    await s.update({ unlocked: true, admin: false, deviceId: data.deviceId, friendId: friend.id, token, at: Date.now() });
+    await logActivity("login", `${friend.name} signed in`,data.deviceId,data.code);
     return { ok: true as const };
   });
 
-type Friend = { id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null };
+type Friend = { device_id: string | null; id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null };
 
 export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
-  if (!(await getGateSession()).data.admin) return { friends: [] as Friend[] };
+  if (!(await (await import("./gate.server")).isAdmin())) return { friends: [] as Friend[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
-  return { friends: (data ?? []).map((f): Friend => ({ id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message })) };
+  return { friends: (data ?? []).map((f): Friend => ({ device_id: f.device_id, id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message })) };
 });
 
 export const createFriend = createServerFn({ method: "POST" })
@@ -82,18 +81,29 @@ export const kickFriend = createServerFn({ method: "POST" })
   });
 
 // Owner signs in to the secret admin page with SITE_PASSWORD.
-export const adminLogin = createServerFn({ method: "POST" })
-  .inputValidator((d: { password: string }) => ({ password: String(d?.password ?? "").slice(0, 200) }))
+export const checkAdminAccessServer = createServerFn({ method: "GET" }).handler(async () => {
+  const { enforceChromebook, getGateSession } = await import("./gate.server");
+  return { allowed: await enforceChromebook((await getGateSession()).data.deviceId) };
+});
+
+export const checkAdminAccess = createServerFn({ method: "POST" })
+  .inputValidator((d: { deviceId: string }) => z.object({ deviceId: deviceIdSchema }).parse(d))
   .handler(async ({ data }) => {
-    const { getGateSession, passwordMatches } = await import("./gate.server");
+    const { enforceChromebook, isDeviceBanned } = await import("./gate.server");
+    return { allowed: await enforceChromebook(data.deviceId) && !(await isDeviceBanned(data.deviceId)) };
+  });
+
+export const adminLogin = createServerFn({ method: "POST" })
+  .inputValidator((d: { password: string; deviceId: string }) => z.object({ password: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
+  .handler(async ({ data }) => {
+    const { getGateSession, passwordMatches, enforceChromebook, isDeviceBanned, failedAttempt, logActivity } = await import("./gate.server");
+    if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook admin login rejected",data.deviceId,data.password); return { ok: false as const }; }
+    if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted admin login",data.deviceId,data.password); return { ok: false as const }; }
     const expected = process.env["SITE_PASSWORD"];
-    if (!expected || !passwordMatches(data.password, expected)) {
-      const { logActivity } = await import("./gate.server");
-      await logActivity("wrong", "Wrong admin passcode tried");
-      return { ok: false as const };
-    }
+    if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
     const s = await getGateSession();
-    await s.update({ unlocked: true, admin: true });
+    await s.update({ unlocked: true, admin: true, deviceId: data.deviceId, at: Date.now(), friendId: undefined, token: undefined });
+    await logActivity("admin_login", "Admin signed in",data.deviceId);
     return { ok: true as const };
   });
 
@@ -109,12 +119,12 @@ export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => 
 async function requireAdmin() {
   const { getGateSession } = await import("./gate.server");
   const s = await getGateSession();
-  if (!s.data.admin) throw new Error("Not Found");
+  if (!(await (await import("./gate.server")).isAdmin())) throw new Error("Not Found");
 }
 
 export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
-  if (!(await getGateSession()).data.admin) return { admin: false as const, codes: [] as string[] };
+  if (!(await (await import("./gate.server")).isAdmin())) return { admin: false as const, codes: [] as string[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("access_codes").select("code").order("created_at", { ascending: false });
   return { admin: true as const, codes: (data ?? []).map((r) => r.code) };
@@ -182,9 +192,9 @@ export const updateFriend = createServerFn({ method: "POST" })
 
 export const getActivity = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession, getSettings } = await import("./gate.server");
-  if (!(await getGateSession()).data.admin) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null } };
+  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null } };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("activity_log").select("at, kind, detail").order("at", { ascending: false }).limit(50);
+  const { data } = await supabaseAdmin.from("activity_log").select("at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
   return { log: data ?? [], settings: await getSettings() };
 });
 
@@ -209,11 +219,12 @@ export const saveSettings = createServerFn({ method: "POST" })
       id: 1,
       lockdown: data.lockdown ?? cur.lockdown,
       hidden_games: data.hidden_games ?? cur.hidden_games,
-      kick_all_at: data.kickAll ? new Date().toISOString() : cur.kick_all_at,
+      kick_all_at: data.kickAll || data.lockdown === true ? new Date().toISOString() : cur.kick_all_at,
     };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("site_settings").upsert(next);
-    if (data.kickAll) await supabaseAdmin.from("friend_passwords").update({ active_session: null }).not("id", "is", null);
+    const { error } = await supabaseAdmin.from("site_settings").upsert(next);
+    if (error) throw new Error("Could not save settings");
+    if (data.kickAll || data.lockdown === true) await (await import("./gate.server")).evictUsers(data.lockdown);
     return { ok: true };
   });
 
@@ -227,20 +238,27 @@ export const messageFriend = createServerFn({ method: "POST" })
   });
 
 export const listBans = createServerFn({ method: "GET" }).handler(async () => {
-  const { getGateSession } = await import("./gate.server");
-  if (!(await getGateSession()).data.admin) return { bans: [] as { ip: string; note: string }[] };
+  if (!(await (await import("./gate.server")).isAdmin())) return { bans: [] as { device_id: string; note: string; created_at: string }[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("banned_ips").select("ip, note").order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin.from("banned_devices").select("device_id,note,created_at").order("created_at",{ascending:false});
+  if (error) throw new Error("Could not list browser bans");
   return { bans: data ?? [] };
 });
-
 export const setBan = createServerFn({ method: "POST" })
-  .inputValidator((d: { ip: string; note?: string; banned: boolean }) => ({ ip: String(d?.ip ?? "").trim().slice(0, 60), note: String(d?.note ?? "").slice(0, 60), banned: !!d?.banned }))
+  .inputValidator((d: { deviceId: string; note?: string; banned: boolean }) => z.object({ deviceId: deviceIdSchema, note: z.string().max(200).optional(), banned: z.boolean() }).parse(d))
   .handler(async ({ data }) => {
     await requireAdmin();
-    if (!data.ip) return { ok: false };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    if (data.banned) await supabaseAdmin.from("banned_ips").upsert({ ip: data.ip, note: data.note });
-    else await supabaseAdmin.from("banned_ips").delete().eq("ip", data.ip);
+    const result = data.banned ? await supabaseAdmin.from("banned_devices").upsert({device_id:data.deviceId,note:data.note ?? ""}) : await supabaseAdmin.from("banned_devices").delete().eq("device_id",data.deviceId);
+    if (result.error) throw new Error("Could not update browser ban");
+    if (!data.banned) await supabaseAdmin.from("device_failures").delete().eq("device_id",data.deviceId);
+    await (await import("./gate.server")).logActivity("ban",data.banned ? "Browser banned" : "Browser unbanned",data.deviceId);
     return { ok: true };
   });
+export const globalPanic = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { evictUsers, logActivity } = await import("./gate.server");
+  await evictUsers();
+  await logActivity("admin_panic","Global Panic: kicked all players to geometry");
+  return { ok: true as const };
+});

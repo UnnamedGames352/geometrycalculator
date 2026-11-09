@@ -15,7 +15,7 @@ export const Route = createFileRoute("/hub")({
             headers: { "cache-control": "no-store, no-cache, must-revalidate" },
           });
         }
-        if (!unlocked) return new Response("Not Found", { status: 404 });
+        if (!unlocked) return Response.redirect(new URL("/geometry", request.url).toString(), 302);
 
         await setCurrentGame(null);
         const { default: raw } = await import("@/server/hub.html?raw");

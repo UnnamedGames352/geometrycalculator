@@ -32,21 +32,48 @@ export type Database = {
       activity_log: {
         Row: {
           at: string
+          attempted_input: string | null
           detail: string
+          device: string | null
+          device_id: string | null
           id: string
           kind: string
         }
         Insert: {
           at?: string
+          attempted_input?: string | null
           detail?: string
+          device?: string | null
+          device_id?: string | null
           id?: string
           kind: string
         }
         Update: {
           at?: string
+          attempted_input?: string | null
           detail?: string
+          device?: string | null
+          device_id?: string | null
           id?: string
           kind?: string
+        }
+        Relationships: []
+      }
+      banned_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          note: string
+        }
+        Insert: {
+          created_at?: string
+          device_id: string
+          note?: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          note?: string
         }
         Relationships: []
       }
@@ -68,12 +95,31 @@ export type Database = {
         }
         Relationships: []
       }
+      device_failures: {
+        Row: {
+          at: string
+          device_id: string
+          id: number
+        }
+        Insert: {
+          at?: string
+          device_id: string
+          id?: never
+        }
+        Update: {
+          at?: string
+          device_id?: string
+          id?: never
+        }
+        Relationships: []
+      }
       friend_passwords: {
         Row: {
           active_session: string | null
           created_at: string
           current_game: string | null
           device: string | null
+          device_id: string | null
           expires_at: string | null
           game_started_at: string | null
           id: string
@@ -92,6 +138,7 @@ export type Database = {
           created_at?: string
           current_game?: string | null
           device?: string | null
+          device_id?: string | null
           expires_at?: string | null
           game_started_at?: string | null
           id?: string
@@ -110,6 +157,7 @@ export type Database = {
           created_at?: string
           current_game?: string | null
           device?: string | null
+          device_id?: string | null
           expires_at?: string | null
           game_started_at?: string | null
           id?: string
@@ -151,7 +199,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      evict_gate_users: { Args: { p_lockdown?: boolean }; Returns: undefined }
+      record_device_failure: { Args: { p_device_id: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never

@@ -36,6 +36,13 @@
       "when": 1793970236752,
       "tag": "0004_live_view_bans_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794230505542,
+      "tag": "0005_browser_security_controls",
+      "breakpoints": true
     }
   ]
 }

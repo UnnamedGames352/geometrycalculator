@@ -21,7 +21,7 @@ export const Route = createFileRoute("/play/$")({
     handlers: {
       GET: async ({ request, params }) => {
         const { isUnlocked } = await import("@/lib/gate.server");
-        if (!(await isUnlocked())) return new Response("Not Found", { status: 404 });
+        if (!(await isUnlocked())) return Response.redirect(new URL("/geometry", request.url).toString(), 302);
         const splat = (params as { _splat?: string })._splat ?? "";
         if (splat.includes("..") || !splat) return new Response("Bad path", { status: 400 });
         const url = new URL(request.url);
@@ -48,7 +48,7 @@ export const Route = createFileRoute("/play/$")({
         const ext = file.split(".").pop()?.toLowerCase() ?? "";
         const headers = new Headers({
           "content-type": TYPES[ext] ?? "application/octet-stream",
-          "cache-control": "public, max-age=86400",
+          "cache-control": "private, no-store",
         });
         if (ext === "html" || ext === "htm") {
           const { guardScript, setCurrentGame } = await import("@/lib/gate.server");
