@@ -1,5 +1,7 @@
 import { useSession } from "@tanstack/react-start/server";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { DEVICE_ID_PATTERN, isChromeOSChrome } from "./security-rules";
+export { guardScript } from "./guard-script";
 
 // The device ID is a random browser-local identifier, not a hardware serial number.
 type GateSession = {
@@ -11,11 +13,15 @@ type GateSession = {
   at?: number;
 };
 
-const config = () => ({
-  password: process.env["SESSION_SECRET"]!,
+const config = () => {
+  const password = process.env["SESSION_SECRET"];
+  if (!password) throw new Error("Session unavailable");
+  return ({
+  password,
   name: "site-gate",
   cookie: { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/" },
 });
+};
 
 export const getGateSession = () => useSession<GateSession>(config());
 
@@ -23,27 +29,62 @@ export type SiteSettings = { lockdown: boolean; hidden_games: string[]; kick_all
 
 export async function getSettings(): Promise<SiteSettings> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("site_settings").select("lockdown, hidden_games, kick_all_at").eq("id", 1).maybeSingle();
+  const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, hidden_games, kick_all_at").eq("id", 1).maybeSingle();
+  if (error) throw new Error("Could not check site settings");
   return data ?? { lockdown: false, hidden_games: [], kick_all_at: null };
 }
 
 // Every activity entry includes the browser ID when one has been assigned, so an
 // admin can copy it into the device-ban manager. IPs remain diagnostic only.
-export async function logActivity(kind: string, detail = "") {
+export async function logActivity(kind: string, detail = "", deviceId?: string, attemptedInput?: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  let extra = "";
-  try {
-    const [d, session] = await Promise.all([deviceInfo(), getGateSession()]);
-    extra = ` — ${[d.device, d.location, d.ip && `IP ${d.ip}`, session.data.deviceId && `Device ID ${session.data.deviceId}`].filter(Boolean).join(" · ")}`;
-  } catch { /* no request */ }
-  await supabaseAdmin.from("activity_log").insert({ kind, detail: (detail.slice(0, 80) + extra).slice(0, 300) });
+  const [d, session] = await Promise.all([deviceInfo(), getGateSession()]);
+  const id = deviceId ?? session.data.deviceId;
+  const { error } = await supabaseAdmin.from("activity_log").insert({ kind, detail: `${detail} — ${[d.device, d.location, d.ip && `IP ${d.ip}`].filter(Boolean).join(" · ")}`.slice(0,1000), device: d.device, device_id: id && DEVICE_ID_PATTERN.test(id) ? id : null, attempted_input: attemptedInput ?? null });
+  if (error) throw new Error("Could not record activity");
+}
+
+export async function evictUsers(lockdown?: boolean) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { error } = await supabaseAdmin.rpc("evict_gate_users", { p_lockdown: lockdown });
+  if (error) throw new Error("Could not evict sessions");
+}
+
+export async function enforceChromebook(deviceId?: string) {
+  const d = await deviceInfo();
+  if (isChromeOSChrome(d.user_agent)) return true;
+  await evictUsers(true);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  if (deviceId && DEVICE_ID_PATTERN.test(deviceId)) {
+    const { error } = await supabaseAdmin.from("banned_devices").upsert({ device_id: deviceId, note: "Tripwire: Non-Chromebook attempt" });
+    if (error) throw new Error("Could not ban browser");
+  }
+  await logActivity("tripwire", `TRIPWIRE: Non-Chromebook attempted access (${d.device}). Initiated lockdown and kicked all users.`, deviceId);
+  const session = await getGateSession();
+  await session.clear();
+  return false;
+}
+
+export async function failedAttempt(kind: "wrong" | "admin_wrong", input: string, deviceId: string) {
+  await logActivity(kind, kind === "wrong" ? "Wrong code or password" : "Wrong admin password", deviceId, input);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin.rpc("record_device_failure", { p_device_id: deviceId });
+  if (error) throw new Error("Could not record failed attempt");
+  if (data) await logActivity("blocked", "Auto-ban: 3 failed attempts within 5 minutes", deviceId);
+}
+
+export async function isAdmin() {
+  const s = await getGateSession();
+  if (!s.data.admin || !(await enforceChromebook(s.data.deviceId))) return false;
+  return !!s.data.deviceId && !(await isDeviceBanned(s.data.deviceId));
 }
 
 /** markSeen: update the friend's "last seen" time (done on hub loads, not every game file). */
 export async function isUnlocked(opts: { markSeen?: boolean } = {}) {
   const s = await getGateSession();
   if (!s.data.unlocked) return false;
-  if (s.data.admin) return true;
+  if (!s.data.deviceId || !isChromeOSChrome((await deviceInfo()).user_agent)) return false;
+  if (s.data.admin) return isAdmin();
   const settings = await getSettings();
   if (settings.lockdown) return false;
   if (settings.kick_all_at && (s.data.at ?? 0) < new Date(settings.kick_all_at).getTime()) return false;
@@ -81,10 +122,10 @@ export async function deviceInfo() {
 }
 
 export async function isDeviceBanned(deviceId: string) {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)) return false;
+  if (!DEVICE_ID_PATTERN.test(deviceId)) return false;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const db = supabaseAdmin as unknown as { from: (table: string) => any };
-  const { data } = await db.from("banned_devices").select("device_id").eq("device_id", deviceId).maybeSingle();
+  const { data, error } = await supabaseAdmin.from("banned_devices").select("device_id").eq("device_id", deviceId).maybeSingle();
+  if (error) throw new Error("Could not check browser ban");
   return !!data;
 }
 
@@ -114,13 +155,3 @@ export async function takeMessage(ack: boolean) {
   return data?.message ?? null;
 }
 
-// Injected into the hub and every game page: kick check, admin notes,
-// panic key (Esc twice -> geometry page) and 15-minute idle lock.
-export const guardScript = `<script>(()=>{const T=window.top,go=u=>{try{T.sessionStorage.removeItem('gate-tab')}catch{}T.location.replace(u)};
-const touch=()=>{try{T.sessionStorage.setItem('last-active',Date.now())}catch{}};touch();
-['mousemove','mousedown','keydown','touchstart','wheel'].forEach(e=>addEventListener(e,touch,{passive:true,capture:true}));
-let last=0;addEventListener('keydown',e=>{if(e.key==='Escape'){const n=Date.now();if(n-last<700)go('/geometry');last=n}},true);
-let busy=false;const check=async()=>{if(busy)return;busy=true;try{const a=+T.sessionStorage.getItem('last-active')||Date.now();if(Date.now()-a>900000){go('/');return}
-const r=await fetch('/hub?session-check=1',{cache:'no-store',credentials:'same-origin'});const s=await r.json();if(!s.unlocked){go('/');return}
-if(s.message&&window===T.frames[0]){alert(s.message);await fetch('/hub?session-check=1&ack=1',{cache:'no-store'})}}catch{}finally{busy=false}};
-void check();setInterval(check,2000)})()</script>`;
