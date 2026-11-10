@@ -43,6 +43,13 @@
       "when": 1794230505542,
       "tag": "0005_browser_security_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794336546922,
+      "tag": "0006_friend_roster_details",
+      "breakpoints": true
     }
   ]
 }

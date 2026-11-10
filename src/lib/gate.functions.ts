@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { DEVICE_ID_PATTERN } from "./security-rules";
+import { DEVICE_ID_PATTERN, addPlaytime, parseBrowserVersion, parseHardware } from "./security-rules";
 const deviceIdSchema = z.string().regex(DEVICE_ID_PATTERN);
 
 export const checkUnlocked = createServerFn({ method: "GET" }).handler(async () => {
@@ -10,9 +10,9 @@ export const checkUnlocked = createServerFn({ method: "GET" }).handler(async () 
 
 // Visitors enter a single-use code; it is deleted the moment it's used.
 export const redeemCode = createServerFn({ method: "POST" })
-  .inputValidator((d: { code: string; deviceId: string }) => z.object({ code: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
+  .inputValidator((d: { code: string; deviceId: string; hardware?: unknown }) => ({ ...z.object({ code: z.string().max(200), deviceId: deviceIdSchema }).parse(d), hardware: parseHardware(d.hardware) }))
   .handler(async ({ data }) => {
-    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo } = await import("./gate.server");
+    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
     if ((await getSettings()).lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
@@ -33,21 +33,23 @@ export const redeemCode = createServerFn({ method: "POST" })
       await logActivity("blocked", `${friend.name}: password paused or expired`,data.deviceId,data.code); return { ok: false as const };
     }
     const token = crypto.randomUUID();
-    const { error: updateError } = await supabaseAdmin.from("friend_passwords").update({ active_session: token, device_id: data.deviceId, last_login: new Date().toISOString(), last_seen: new Date().toISOString(), ...(await deviceInfo()) }).eq("id",friend.id);
+    await settlePlaytime(friend.id);
+    const info = await deviceInfo();
+    const { error: updateError } = await supabaseAdmin.from("friend_passwords").update({ active_session: token, device_id: data.deviceId, last_login: new Date().toISOString(), last_seen: new Date().toISOString(), ...info, browser_version: parseBrowserVersion(info.user_agent), screen: data.hardware.screen, cpu_cores: data.hardware.cores, memory_gb: data.hardware.memory }).eq("id",friend.id);
     if (updateError) throw new Error("Could not start friend session");
     await s.update({ unlocked: true, admin: false, deviceId: data.deviceId, friendId: friend.id, token, at: Date.now() });
     await logActivity("login", `${friend.name} signed in`,data.deviceId,data.code);
     return { ok: true as const };
   });
 
-type Friend = { device_id: string | null; id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null };
+type Friend = { device_id: string | null; id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null; browser_version: string | null; screen: string | null; cpu_cores: number | null; memory_gb: number | null; total_play_seconds: number; play_seconds: Record<string, number>; admin_note: string };
 
 export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
   if (!(await (await import("./gate.server")).isAdmin())) return { friends: [] as Friend[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
-  return { friends: (data ?? []).map((f): Friend => ({ device_id: f.device_id, id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message })) };
+  return { friends: (data ?? []).map((f): Friend => ({ device_id: f.device_id, id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message, browser_version: f.browser_version, screen: f.screen, cpu_cores: f.cpu_cores, memory_gb: f.memory_gb, total_play_seconds: f.total_play_seconds, play_seconds: addPlaytime(f.play_seconds, null, 0), admin_note: f.admin_note })) };
 });
 
 export const createFriend = createServerFn({ method: "POST" })
@@ -165,8 +167,9 @@ const randomPassword = async () => {
 
 // Edit a friend: rename, set/random new password (kicks them out), pause, expiry.
 export const updateFriend = createServerFn({ method: "POST" })
-  .inputValidator((d: { id: string; name?: string; password?: string; newRandom?: boolean; paused?: boolean; expires_at?: string | null }) => ({
+  .inputValidator((d: { id: string; name?: string; password?: string; newRandom?: boolean; paused?: boolean; expires_at?: string | null; admin_note?: string }) => ({
     id: String(d?.id ?? ""),
+    admin_note: d?.admin_note === undefined ? undefined : String(d.admin_note).trim().slice(0, 300),
     name: d?.name === undefined ? undefined : String(d.name).trim().slice(0, 40),
     password: d?.password === undefined ? undefined : String(d.password).trim().toUpperCase().slice(0, 40),
     newRandom: !!d?.newRandom,
@@ -175,7 +178,8 @@ export const updateFriend = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }) => {
     await requireAdmin();
-    const patch: { name?: string; password?: string; active_session?: null; paused?: boolean; expires_at?: string | null } = {};
+    const patch: { name?: string; password?: string; active_session?: null; paused?: boolean; expires_at?: string | null; admin_note?: string } = {};
+    if (data.admin_note !== undefined) patch.admin_note = data.admin_note;
     if (data.name !== undefined) patch.name = data.name;
     const pw = data.newRandom ? await randomPassword() : data.password;
     if (pw !== undefined) {

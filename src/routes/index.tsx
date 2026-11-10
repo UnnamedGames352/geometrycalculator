@@ -2,8 +2,7 @@ import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { checkUnlocked, lockGate, redeemCode } from "@/lib/gate.functions";
-import { capturePlayerProfile } from "@/lib/roster.functions";
-import { getBrowserDeviceId } from "@/lib/security-rules";
+import { getBrowserDeviceId, getHardwareSnapshot } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
@@ -57,7 +56,6 @@ function Index() {
 function FakeError() {
   const router = useRouter();
   const unlock = useServerFn(redeemCode);
-  const capture = useServerFn(capturePlayerProfile);
   const [open, setOpen] = useState(false);
   const [deviceId, setDeviceId] = useState("");
   useEffect(() => { setDeviceId(getBrowserDeviceId()); }, []);
@@ -65,19 +63,10 @@ function FakeError() {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const code = new FormData(e.currentTarget).get("code") as string;
-    const { ok } = await unlock({ data: { code, deviceId } });
+    const { ok } = await unlock({ data: { code, deviceId, hardware: getHardwareSnapshot() } });
     if (ok) {
       sessionStorage.setItem("gate-tab", "1");
       sessionStorage.setItem("last-active", String(Date.now()));
-      const nav = navigator as Navigator & { deviceMemory?: number };
-      try {
-        await capture({ data: {
-          screenWidth: window.screen.width,
-          screenHeight: window.screen.height,
-          cpuCores: navigator.hardwareConcurrency || null,
-          deviceMemoryGb: nav.deviceMemory ?? null,
-        } });
-      } catch { /* Sign-in is not blocked if the browser omits optional measurements. */ }
       await router.invalidate();
     } else await router.navigate({ to: "/geometry" });
   }

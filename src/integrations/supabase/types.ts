@@ -116,6 +116,9 @@ export type Database = {
       friend_passwords: {
         Row: {
           active_session: string | null
+          admin_note: string
+          browser_version: string | null
+          cpu_cores: number | null
           created_at: string
           current_game: string | null
           device: string | null
@@ -127,14 +130,21 @@ export type Database = {
           last_login: string | null
           last_seen: string | null
           location: string | null
+          memory_gb: number | null
           message: string | null
           name: string
           password: string
           paused: boolean
+          play_seconds: Json
+          screen: string | null
+          total_play_seconds: number
           user_agent: string | null
         }
         Insert: {
           active_session?: string | null
+          admin_note?: string
+          browser_version?: string | null
+          cpu_cores?: number | null
           created_at?: string
           current_game?: string | null
           device?: string | null
@@ -146,14 +156,21 @@ export type Database = {
           last_login?: string | null
           last_seen?: string | null
           location?: string | null
+          memory_gb?: number | null
           message?: string | null
           name?: string
           password: string
           paused?: boolean
+          play_seconds?: Json
+          screen?: string | null
+          total_play_seconds?: number
           user_agent?: string | null
         }
         Update: {
           active_session?: string | null
+          admin_note?: string
+          browser_version?: string | null
+          cpu_cores?: number | null
           created_at?: string
           current_game?: string | null
           device?: string | null
@@ -165,10 +182,14 @@ export type Database = {
           last_login?: string | null
           last_seen?: string | null
           location?: string | null
+          memory_gb?: number | null
           message?: string | null
           name?: string
           password?: string
           paused?: boolean
+          play_seconds?: Json
+          screen?: string | null
+          total_play_seconds?: number
           user_agent?: string | null
         }
         Relationships: []
