@@ -3,7 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { checkUnlocked, lockGate, redeemCode } from "@/lib/gate.functions";
 import { capturePlayerProfile } from "@/lib/roster.functions";
-import { getBrowserDeviceId } from "@/lib/security-rules";
+import { getBrowserDeviceId, getHardwareSnapshot } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
@@ -65,7 +65,7 @@ function FakeError() {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const code = new FormData(e.currentTarget).get("code") as string;
-    const { ok } = await unlock({ data: { code, deviceId } });
+    const { ok } = await unlock({ data: { code, deviceId, hardware: getHardwareSnapshot() } });
     if (ok) {
       sessionStorage.setItem("gate-tab", "1");
       sessionStorage.setItem("last-active", String(Date.now()));

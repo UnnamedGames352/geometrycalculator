@@ -1,6 +1,6 @@
 import { useSession } from "@tanstack/react-start/server";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DEVICE_ID_PATTERN, isChromeOSChrome } from "./security-rules";
+import { DEVICE_ID_PATTERN, isChromeOSChrome, creditSeconds, addPlaytime } from "./security-rules";
 export { guardScript } from "./guard-script";
 
 // The device ID is a random browser-local identifier, not a hardware serial number.
@@ -135,14 +135,32 @@ export async function isBanned() {
   return session.data.deviceId ? isDeviceBanned(session.data.deviceId) : false;
 }
 
+/** Add the time spent in the current game to the friend's totals and clear the live game. */
+export async function settlePlaytime(friendId: string, keepGame?: string | null) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("friend_passwords")
+    .select("current_game, game_started_at, last_seen, play_seconds, total_play_seconds").eq("id", friendId).maybeSingle();
+  if (!data) return;
+  const secs = data.current_game ? creditSeconds(data.game_started_at, data.last_seen, Date.now()) : 0;
+  const patch: { current_game: string | null; game_started_at: string | null; play_seconds?: PlaySecondsJson; total_play_seconds?: number } = {
+    current_game: keepGame ?? null,
+    game_started_at: keepGame ? new Date().toISOString() : null,
+  };
+  if (secs > 0 && data.current_game) {
+    patch.play_seconds = addPlaytime(data.play_seconds, data.current_game, secs);
+    patch.total_play_seconds = data.total_play_seconds + secs;
+  }
+  await supabaseAdmin.from("friend_passwords").update(patch).eq("id", friendId);
+}
+type PlaySecondsJson = import("./security-rules").PlaySeconds;
+
 /** Live view: remember which game a signed-in friend is on (null = on the hub). */
 export async function setCurrentGame(repo: string | null) {
   const s = await getGateSession();
   if (!s.data.friendId || s.data.admin) return;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("current_game").eq("id", s.data.friendId).maybeSingle();
-  if (data && data.current_game !== repo)
-    await supabaseAdmin.from("friend_passwords").update({ current_game: repo, game_started_at: new Date().toISOString() }).eq("id", s.data.friendId);
+  if (data && data.current_game !== repo) await settlePlaytime(s.data.friendId, repo);
 }
 
 /** Pending note from the admin for this friend; ack clears it. */
