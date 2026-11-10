@@ -21,7 +21,7 @@ import {
   setBan,
   messageFriend,
 } from "@/lib/gate.functions";
-import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN } from "@/lib/security-rules";
+import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
 import { Copy, Ban } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
@@ -201,6 +201,50 @@ function Admin() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-xl font-bold">Player roster</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Recorded at each sign-in. Hardware values are browser estimates (memory is rounded by Chrome), not serial numbers.</p>
+        {friends.length === 0 ? (
+          <p className="mt-4 rounded-lg bg-muted/40 p-4 text-sm text-muted-foreground">No friends yet.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[960px] text-left text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>{["Name", "Status", "Browser ID", "Browser", "Hardware", "Playtime", "Most played", "Last seen", "Note"].map((h) => <th key={h} scope="col" className="px-3 py-2 font-medium">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {friends.map((f) => {
+                  const active = onlineFriends.some((o) => o.id === f.id);
+                  const live = active && f.current_game ? creditSeconds(f.game_started_at, f.last_seen, Date.now()) : 0;
+                  const play = { ...f.play_seconds };
+                  if (live && f.current_game) play[f.current_game] = (play[f.current_game] ?? 0) + live;
+                  const top = topGame(play);
+                  const banned = !!f.device_id && bans.some((b) => b.device_id === f.device_id);
+                  const status = banned ? "Banned" : f.paused ? "Paused" : active ? (f.current_game ? `Playing ${f.current_game}` : "On hub") : "Offline";
+                  const hw = [f.screen, f.cpu_cores && `${f.cpu_cores} cores`, f.memory_gb && `${f.memory_gb} GB`].filter(Boolean).join(" · ");
+                  return (
+                    <tr key={f.id} className="border-t border-border align-top">
+                      <td className="px-3 py-2 font-medium">{f.name || "(no name)"}</td>
+                      <td className={`px-3 py-2 ${banned ? "text-destructive" : active ? "text-success" : "text-muted-foreground"}`}>{status}</td>
+                      <td className="max-w-[180px] px-3 py-2">{f.device_id ? <DeviceControls id={f.device_id} onBan={async () => { await ban({ data: { deviceId: f.device_id ?? "", note: f.name, banned: true } }); await refresh(); }} /> : <span className="text-muted-foreground">—</span>}</td>
+                      <td className="px-3 py-2 text-xs" title={f.user_agent ?? ""}>{f.device || "—"}{f.browser_version && <div className="text-muted-foreground">{f.browser_version}</div>}</td>
+                      <td className="px-3 py-2 text-xs">{hw || <span className="text-muted-foreground">Next sign-in</span>}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatDuration(f.total_play_seconds + live)}</td>
+                      <td className="px-3 py-2">{top ? <>{top.game}<div className="text-xs text-muted-foreground">{formatDuration(top.seconds)}</div></> : <span className="text-muted-foreground">—</span>}</td>
+                      <td className="px-3 py-2 text-xs">{when(f.last_seen)}</td>
+                      <td className="max-w-[200px] px-3 py-2 text-xs">
+                        {f.admin_note && <p className="mb-1 break-words">{f.admin_note}</p>}
+                        <Button variant="outline" size="sm" className={btn} onClick={() => { const v = prompt(`Private note for ${f.name}`, f.admin_note); if (v !== null) void edit(f.id, { admin_note: v }); }}>{f.admin_note ? "edit note" : "add note"}</Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="mt-8">
