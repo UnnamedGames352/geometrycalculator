@@ -9,6 +9,8 @@
 - [x] Fake error page with hidden button + password unlock (needs SITE_PASSWORD from user)
 - [x] Single-use access codes + hidden /admin page to make codes
 
+- [x] Player roster on admin page (hardware, browser version, playtime, top game, private notes)
+
 ## Security checklist
 - [ ] Repair game disguise import and implement muted launch / tab restore guards
 - [ ] Complete browser UUID bans, Chromebook tripwire, attempt logs and 3-in-5-minute auto-ban
