@@ -5,6 +5,11 @@ import { tabDisguiseScript } from "@/lib/tab-disguise";
 // through this domain, so games work even where github.io is blocked.
 const OWNER = "UnnamedGames352";
 
+// Games whose playable files live outside the owner's own repos.
+const SOURCES: Record<string, string> = {
+  "Crossy-Road": "crossy-road-unblock/crossy-road-unblock.github.io/HEAD/crossy-road/",
+};
+
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
   js: "text/javascript; charset=utf-8", mjs: "text/javascript; charset=utf-8",
@@ -35,8 +40,9 @@ export const Route = createFileRoute("/play/$")({
         }
         let file = rest.join("/");
         if (file === "" || file.endsWith("/")) file += "index.html";
+        const source = SOURCES[repo] ?? `${OWNER}/${repo}/HEAD/`;
         const raw = (f: string) =>
-          `https://raw.githubusercontent.com/${OWNER}/${repo}/HEAD/${f.split("/").map(encodeURIComponent).join("/")}`;
+          `https://raw.githubusercontent.com/${source}${f.split("/").map(encodeURIComponent).join("/")}`;
         let upstream = await fetch(raw(file));
         // Some games reference "_2_" texture variants that don't exist in the
         // repo; fall back to the base texture (e.g. groundSquare_01_2_001 -> _001).
