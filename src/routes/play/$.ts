@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { tabDisguiseScript } from "@/lib/tab-disguise";
+import {
+  adaptCrazyCattleHtml,
+  adaptCrazyCattleScript,
+  adaptHollowKnightHtml,
+  adaptPolyTrackHtml,
+} from "@/lib/game-loader-adapters";
 
 // Streams game files straight from the user's GitHub repos (default branch)
 // through this domain, so games work even where github.io is blocked.
@@ -11,14 +17,32 @@ const SOURCES: Record<string, string> = {
 };
 
 const TYPES: Record<string, string> = {
-  html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
-  js: "text/javascript; charset=utf-8", mjs: "text/javascript; charset=utf-8",
-  css: "text/css; charset=utf-8", json: "application/json", wasm: "application/wasm",
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-  svg: "image/svg+xml", webp: "image/webp", ico: "image/x-icon",
-  mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4",
-  mp4: "video/mp4", webm: "video/webm", ttf: "font/ttf", woff: "font/woff",
-  woff2: "font/woff2", otf: "font/otf", xml: "application/xml", txt: "text/plain",
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  mjs: "text/javascript; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  json: "application/json",
+  wasm: "application/wasm",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+  ico: "image/x-icon",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+  m4a: "audio/mp4",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  ttf: "font/ttf",
+  woff: "font/woff",
+  woff2: "font/woff2",
+  otf: "font/otf",
+  xml: "application/xml",
+  txt: "text/plain",
 };
 
 export const Route = createFileRoute("/play/$")({
@@ -26,7 +50,9 @@ export const Route = createFileRoute("/play/$")({
     handlers: {
       GET: async ({ request, params }) => {
         const { isUnlocked } = await import("@/lib/gate.server");
-        if (!(await isUnlocked())) return Response.redirect(new URL("/geometry", request.url).toString(), 302);
+        if (!(await isUnlocked())) {
+          return Response.redirect(new URL("/geometry", request.url).toString(), 302);
+        }
         const splat = (params as { _splat?: string })._splat ?? "";
         if (splat.includes("..") || !splat) return new Response("Bad path", { status: 400 });
         const url = new URL(request.url);
@@ -59,11 +85,24 @@ export const Route = createFileRoute("/play/$")({
         if (ext === "html" || ext === "htm") {
           const { guardScript, setCurrentGame } = await import("@/lib/gate.server");
           if (file === "index.html") await setCurrentGame(repo);
-          const html = await upstream.text();
+          let html = await upstream.text();
+          if (repo === "CrazyCattle3D" && file === "index.html") {
+            html = adaptCrazyCattleHtml(html);
+          } else if (repo === "polytrack" && file === "index.html") {
+            html = adaptPolyTrackHtml(html);
+          } else if (repo === "HollowKnight" && file === "index.html") {
+            html = adaptHollowKnightHtml(html);
+          }
           const scripts = `${tabDisguiseScript}${guardScript}`;
-          const out = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + scripts) : scripts + html;
+          const out = /<head[^>]*>/i.test(html)
+            ? html.replace(/<head[^>]*>/i, (m) => m + scripts)
+            : scripts + html;
           headers.set("cache-control", "no-store");
           return new Response(out, { status: 200, headers });
+        }
+        if (repo === "CrazyCattle3D" && file === "CrazyCattle3D.js") {
+          const script = adaptCrazyCattleScript(await upstream.text());
+          return new Response(script, { status: 200, headers });
         }
         // No content-length: upstream may be gzip and fetch decompresses it.
         return new Response(upstream.body, { status: 200, headers });
