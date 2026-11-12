@@ -365,3 +365,7 @@ function AdminGate() {
   }
   return <div className="min-h-screen bg-background p-8 font-serif text-foreground"><h1 className="text-center text-3xl font-bold">404 Not Found</h1><hr className="my-4 border-border"/><p className="text-center">nginx/1.24.0 <Button variant="ghost" type="button" aria-label="." onClick={() => setOpen((value) => !value)} className="h-auto rounded-none p-0 font-serif text-base cursor-default hover:bg-transparent">.</Button></p>{open && <form onSubmit={onSubmit} className="mx-auto mt-10 flex max-w-xs gap-2"><Input name="password" type="password" maxLength={200} autoFocus autoComplete="off"/><Button variant="outline" size="sm" type="submit" aria-label="Submit password">→</Button></form>}</div>;
 }
+function DeviceControls({ id, onBan }: { id: string; onBan: () => Promise<void> }) {
+  const [copied, setCopied] = useState(false);
+  return <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs"><code className="break-all">{id}</code><Button variant="ghost" size="icon" className="h-7 w-7" title={copied ? "Copied" : "Copy Device ID"} aria-label="Copy Device ID" onClick={async () => { await navigator.clipboard.writeText(id); setCopied(true); }}><Copy /></Button><Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Ban Device" aria-label="Ban Device" onClick={() => void onBan()}><Ban /></Button></div>;
+}
