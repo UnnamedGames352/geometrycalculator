@@ -6,11 +6,9 @@ const go=()=>{store.removeItem('gate-tab');store.removeItem('gate-route');try{T.
 if(store.getItem('gate-tab')!=='1'){go();return}
 const route=T.location.pathname;store.setItem('gate-route',route);
 const restore=store.getItem('gate-navigation')===route;store.removeItem('gate-navigation');
-if(T.performance.getEntriesByType('navigation')[0]?.type==='back_forward'&&!restore){go();return}
 let navigating=false;const permit=u=>{try{const url=new URL(u,location.href);if(url.origin===location.origin&&(url.pathname.startsWith('/play/')||url.pathname==='/hub')){navigating=true;store.setItem('gate-navigation',url.pathname)}}catch{}};
 addEventListener('click',e=>{const link=e.target.closest?.('a[href]');if(link)permit(link.href)},true);
-addEventListener('pagehide',()=>{if(!navigating){store.removeItem('gate-tab');store.removeItem('gate-route')}},true);
-addEventListener('pageshow',e=>{if(e.persisted)go()});
+addEventListener('pageshow',e=>{if(e.persisted)void check()});
 const touch=()=>store.setItem('last-active',String(Date.now()));if(!store.getItem('last-active'))touch();
 ['mousemove','mousedown','keydown','touchstart','wheel'].forEach(e=>addEventListener(e,touch,{passive:true,capture:true}));
 let last=0;addEventListener('keydown',e=>{if(e.key==='Escape'){const now=Date.now();if(now-last<700)go();last=now}},true);
