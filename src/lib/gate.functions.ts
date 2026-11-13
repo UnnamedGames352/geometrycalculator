@@ -229,17 +229,75 @@ export const saveSettings = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.from("site_settings").upsert(next);
     if (error) throw new Error("Could not save settings");
     if (data.kickAll || data.lockdown === true) await (await import("./gate.server")).evictUsers(data.lockdown);
+    if (data.lockdown === true && !cur.lockdown) await (await import("./gate.server")).logActivity("admin_lockdown", "Admin enabled site lockdown");
+    if (data.kickAll) await (await import("./gate.server")).logActivity("admin_panic", "Admin cleared all player sessions");
     return { ok: true };
   });
 
 export const messageFriend = createServerFn({ method: "POST" })
-  .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? ""), message: String(d?.message ?? "").trim().slice(0, 300) }))
+  .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? "").trim(), message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
     await requireAdmin();
+    if (!data.id) throw new Error("Friend id is required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
-    return { ok: true };
+    const { error } = await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
+    if (error) throw new Error("Could not send the message.");
+    return { ok: true as const };
   });
+
+export const messageOnlineFriend = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; message: string }) => ({
+    id: String(d?.id ?? "").trim(),
+    message: String(d?.message ?? "").trim().slice(0, 300),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    if (!data.id || !data.message) throw new Error("A player and message are required.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+    const cutoff = new Date(Date.now() - 120_000).toISOString();
+    const { data: rows, error } = await supabaseAdmin.from("friend_passwords")
+      .update({ message: data.message }).eq("id", data.id)
+      .not("active_session", "is", null).eq("paused", false)
+      .or(`expires_at.is.null,expires_at.gt.${now}`).gt("last_seen", cutoff).select("id");
+    if (error) throw new Error("Could not send the message.");
+    if (!rows?.length) return { ok: false as const, error: "That player is no longer online." };
+    return { ok: true as const, sent: 1 };
+  });
+
+export const messageOnlineFriends = createServerFn({ method: "POST" })
+  .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    if (!data.message) throw new Error("Enter a message before sending.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+    const cutoff = new Date(Date.now() - 120_000).toISOString();
+    const { data: rows, error } = await supabaseAdmin.from("friend_passwords")
+      .update({ message: data.message })
+      .not("active_session", "is", null).eq("paused", false)
+      .or(`expires_at.is.null,expires_at.gt.${now}`).gt("last_seen", cutoff).select("id");
+    if (error) throw new Error("Could not broadcast to online players.");
+    return { ok: true as const, sent: rows?.length ?? 0 };
+  });
+
+export const messageAllFriends = createServerFn({ method: "POST" })
+  .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    if (!data.message) throw new Error("Enter a message before sending.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin.from("friend_passwords")
+      .update({ message: data.message })
+      .not("id", "is", null).select("id");
+    if (error) throw new Error("Could not broadcast to friend accounts.");
+    return { ok: true as const, sent: rows?.length ?? 0 };
+  });
+
+export const getGeometryTripwireNotice = createServerFn({ method: "GET" }).handler(async () => {
+  const { takeTripwireNotice } = await import("./gate.server");
+  return { message: await takeTripwireNotice() };
+});
 
 export const listBans = createServerFn({ method: "GET" }).handler(async () => {
   if (!(await (await import("./gate.server")).isAdmin())) return { bans: [] as { device_id: string; note: string; created_at: string }[] };
