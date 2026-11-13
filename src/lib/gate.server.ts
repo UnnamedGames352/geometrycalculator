@@ -11,6 +11,8 @@ type GateSession = {
   token?: string | undefined;
   deviceId?: string | undefined;
   at?: number;
+  tripwireNotice?: boolean;
+  tripwireNoticeShown?: boolean;
 };
 
 const config = () => {
@@ -50,9 +52,62 @@ export async function evictUsers(lockdown?: boolean) {
   if (error) throw new Error("Could not evict sessions");
 }
 
+const TRIPWIRE_NOTICE = "Access was stopped because this site only allows Chrome on ChromeOS (Chromebooks). The security tripwire placed the hub in lockdown and ended active player sessions. You are seeing this explanation instead of a crashed page.";
+
+async function latestEvictionEvent(): Promise<{ at: string; kind: string } | null> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin.from("activity_log")
+    .select("at,kind")
+    .in("kind", ["tripwire", "admin_panic", "admin_lockdown"])
+    .order("at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error("Could not check the latest security event");
+  return data ?? null;
+}
+
+export async function getTripwireBroadcast() {
+  const session = await getGateSession();
+  if (session.data.tripwireNotice && !session.data.tripwireNoticeShown) return TRIPWIRE_NOTICE;
+  if (session.data.tripwireNoticeShown || !session.data.at) return null;
+  const event = await latestEvictionEvent();
+  return event?.kind === "tripwire" && Date.parse(event.at) > session.data.at ? TRIPWIRE_NOTICE : null;
+}
+
+export async function takeTripwireNotice() {
+  const session = await getGateSession();
+  if (session.data.tripwireNoticeShown) return null;
+  if (session.data.tripwireNotice) {
+    await session.update({ ...session.data, tripwireNotice: false, tripwireNoticeShown: true });
+    return TRIPWIRE_NOTICE;
+  }
+  if (!session.data.at) return null;
+  const event = await latestEvictionEvent();
+  if (event?.kind !== "tripwire" || Date.parse(event.at) <= session.data.at) return null;
+  await session.update({ ...session.data, tripwireNoticeShown: true });
+  return TRIPWIRE_NOTICE;
+}
+
 export async function enforceChromebook(deviceId?: string) {
   const d = await deviceInfo();
   if (isChromeOSChrome(d.user_agent)) return true;
+  const session = await getGateSession();
+  if (session.data.tripwireNotice && !session.data.tripwireNoticeShown) return false;
+
+  const settings = await getSettings();
+  const latestEvent = settings.lockdown ? await latestEvictionEvent() : null;
+  if (latestEvent?.kind === "tripwire" && (!session.data.at || Date.parse(latestEvent.at) > session.data.at)) {
+    await session.update({
+      ...session.data,
+      unlocked: false,
+      admin: false,
+      deviceId: deviceId ?? session.data.deviceId,
+      tripwireNotice: true,
+      tripwireNoticeShown: false,
+    });
+    return false;
+  }
+
   await evictUsers(true);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   if (deviceId && DEVICE_ID_PATTERN.test(deviceId)) {
@@ -60,8 +115,15 @@ export async function enforceChromebook(deviceId?: string) {
     if (error) throw new Error("Could not ban browser");
   }
   await logActivity("tripwire", `TRIPWIRE: Non-Chromebook attempted access (${d.device}). Initiated lockdown and kicked all users.`, deviceId);
-  const session = await getGateSession();
-  await session.clear();
+  await session.update({
+    ...session.data,
+    unlocked: false,
+    admin: false,
+    deviceId: deviceId ?? session.data.deviceId,
+    at: session.data.at ?? Date.now(),
+    tripwireNotice: true,
+    tripwireNoticeShown: false,
+  });
   return false;
 }
 
@@ -83,7 +145,8 @@ export async function isAdmin() {
 export async function isUnlocked(opts: { markSeen?: boolean } = {}) {
   const s = await getGateSession();
   if (!s.data.unlocked) return false;
-  if (!s.data.deviceId || !isChromeOSChrome((await deviceInfo()).user_agent)) return false;
+  if (!(await enforceChromebook(s.data.deviceId))) return false;
+  if (!s.data.deviceId) return false;
   if (s.data.admin) return isAdmin();
   const settings = await getSettings();
   if (settings.lockdown) return false;
