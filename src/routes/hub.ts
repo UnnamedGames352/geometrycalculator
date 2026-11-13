@@ -5,13 +5,17 @@ export const Route = createFileRoute("/hub")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const { isUnlocked, takeMessage, setCurrentGame, guardScript } = await import("@/lib/gate.server");
+        const { isUnlocked, takeMessage, setCurrentGame, guardScript, getSettings } = await import("@/lib/gate.server");
         const unlocked = await isUnlocked({ markSeen: true });
         const url = new URL(request.url);
 
         if (url.searchParams.get("session-check") === "1") {
+          const settings = await getSettings();
           const message = unlocked ? await takeMessage(url.searchParams.get("ack") === "1") : null;
-          return Response.json({ unlocked, message }, {
+          const broadcast = !unlocked && settings.lockdown
+            ? "LOCKDOWN INITIATED\nAn unauthorized device triggered a security ban. All active game sessions have been terminated. Access is temporarily restricted while the incident is reviewed."
+            : null;
+          return Response.json({ unlocked, message, broadcast }, {
             headers: { "cache-control": "no-store, no-cache, must-revalidate" },
           });
         }
