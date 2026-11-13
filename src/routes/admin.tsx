@@ -130,6 +130,8 @@ function Admin() {
   const hubFriends = onlineFriends.filter((f) => !f.current_game);
   const failureCount = log.filter((entry) => ["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind)).length;
   const bannedIds = new Set(bans.map((item) => item.device_id));
+  const tripwireAlert = log.find((entry) => entry.kind === "tripwire" || /Lockdown Active: Non-Chromebook attempt blocked at/i.test(entry.detail));
+  const autoBanAlert = log.some((entry) => /Auto-ban: 3 failed attempts within 5 minutes/i.test(entry.detail));
   const filteredRoster = friends.filter((f) => {
     const query = rosterSearch.trim().toLowerCase();
     const matchesText = !query || [f.name, f.device_id, f.current_game].some((value) => value?.toLowerCase().includes(query));
@@ -203,10 +205,63 @@ function Admin() {
     try { await navigator.clipboard.writeText(value); toast.success(label); }
     catch { toast.error("Clipboard access was unavailable."); }
   }
+  async function messageOnlineFriends(template: string) {
+    const targets = onlineFriends.map((friend) => friend.id);
+    if (!targets.length) { toast.error("No players are currently online."); return; }
+    await Promise.all(targets.map((id) => note({ data: { id, message: template } })));
+    toast.success(`Sent message to ${targets.length} online player${targets.length === 1 ? "" : "s"}`);
+    await refresh();
+  }
+  async function kickOnlineFriends() {
+    const targets = onlineFriends.map((friend) => friend.id);
+    if (!targets.length) { toast.error("No players are currently online."); return; }
+    await Promise.all(targets.map((id) => kick({ data: { id } })));
+    toast.success(`Kicked ${targets.length} online player${targets.length === 1 ? "" : "s"}`);
+    await refresh();
+  }
+  async function pauseOnlineFriends() {
+    const targets = onlineFriends.map((friend) => friend.id);
+    if (!targets.length) { toast.error("No players are currently online."); return; }
+    await Promise.all(targets.map((id) => editFriend({ data: { id, paused: true } })));
+    toast.success(`Paused ${targets.length} online player${targets.length === 1 ? "" : "s"}`);
+    await refresh();
+  }
+  async function broadcastToAll(message: string) {
+    if (!friends.length) { toast.error("No friend accounts exist yet."); return; }
+    await Promise.all(friends.map((friend) => note({ data: { id: friend.id, message } })));
+    toast.success(`Broadcast sent to ${friends.length} accounts`);
+    await refresh();
+  }
+  async function resetAllSessions() {
+    if (!friends.length) { toast.error("No active sessions to clear."); return; }
+    await Promise.all(friends.map((friend) => kick({ data: { id: friend.id } })));
+    toast.success("All stored sessions have been cleared");
+    await refresh();
+  }
+  function scheduleLockdown(minutes: number) {
+    const ms = minutes * 60_000;
+    toast.info(`${minutes}-minute auto-lock armed`);
+    window.setTimeout(() => {
+      void (async () => {
+        await save({ data: { lockdown: true } });
+        toast.success("Lockdown activated automatically");
+        await refresh();
+      })();
+    }, ms);
+  }
 
   const panelTitle = tabs.find((item) => item.id === tab)?.label ?? "Overview";
   return <main className="mx-auto min-h-screen max-w-[1500px] bg-background px-4 py-6 text-foreground sm:px-7 lg:px-10">
-    <header className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-7">
+    {(tripwireAlert || autoBanAlert) && <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-destructive shadow-sm">
+      <div className="flex items-center gap-3">
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-destructive/15"><Shield className="h-4 w-4" /></span>
+        <div>
+          <p className="text-sm font-semibold">Security incident</p>
+          <p className="text-sm text-destructive/90">{tripwireAlert ? tripwireAlert.detail : "Multiple device failures triggered an auto-ban.")}</p>
+        </div>
+      </div>
+    </div>}
+    <header className="sticky top-0 z-30 rounded-2xl border border-border bg-card/95 p-5 shadow-sm backdrop-blur sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Games hub · command center</p><h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Site controls</h1><p className="mt-2 text-sm text-muted-foreground">Live player operations and access management.</p></div>
         <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${settings.lockdown ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}><span className={`h-2.5 w-2.5 rounded-full ${settings.lockdown ? "bg-destructive" : "animate-pulse bg-success"}`} />{settings.lockdown ? "Lockdown active" : "Live · Synced"}</div>
@@ -220,7 +275,23 @@ function Admin() {
         <Button variant="destructive" onClick={() => ask("Global Panic", "This immediately signs out every player and sends them to Geometry. This cannot be undone.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>
           <X className="mr-2 h-4 w-4" />Global Panic
         </Button>
-        <span className="ml-auto text-xs text-muted-foreground">Updated automatically every 5 seconds</span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="rounded-lg border border-border bg-background px-2 py-1 text-xs text-muted-foreground">Online players</div>
+          <Button variant="outline" size="sm" onClick={() => void messageOnlineFriends("Teacher approaching — wrap up and return to the hub.")}>Message online</Button>
+          <Button variant="outline" size="sm" onClick={() => void kickOnlineFriends()}>Kick online</Button>
+          <Button variant="outline" size="sm" onClick={() => void pauseOnlineFriends()}>Pause online</Button>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+        <div className="rounded-lg border border-border bg-background px-2 py-1 text-xs text-muted-foreground">All accounts</div>
+        <Button variant="outline" size="sm" onClick={() => void broadcastToAll("School-wide notice: please check the hub for the latest update.")}>Broadcast to all</Button>
+        <Button variant="outline" size="sm" onClick={() => void resetAllSessions()}>Reset all sessions</Button>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Class bell auto-lock</span>
+          {[15, 30, 45].map((minutes) => (
+            <Button key={minutes} variant="secondary" size="sm" onClick={() => scheduleLockdown(minutes)}>{minutes}m</Button>
+          ))}
+        </div>
       </div>
       <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
         <StatChip label="Friends" value={friends.length} icon={<Users className="h-4 w-4" />} />
@@ -231,7 +302,7 @@ function Admin() {
       </div>
     </header>
 
-    <nav aria-label="Admin sections" role="tablist" className="sticky top-0 z-10 mt-5 flex gap-2 overflow-x-auto rounded-xl border border-border bg-background/95 p-2 backdrop-blur">
+    <nav aria-label="Admin sections" role="tablist" className="sticky top-[94px] z-20 mt-5 flex gap-2 overflow-x-auto rounded-xl border border-border bg-background/95 p-2 backdrop-blur">
       {tabs.map(({ id, label, icon: Icon }) => {
         const count = id === "players" ? friends.length : id === "friends" ? onlineFriends.length : id === "access" ? codes.length : id === "security" ? bans.length : id === "activity" ? failureCount : null;
         return <button key={id} id={`admin-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls="admin-panel" onClick={() => setTab(id)} onKeyDown={(event) => {
@@ -276,7 +347,7 @@ function Admin() {
             return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`h-2 w-2 rounded-full ${online ? "bg-success" : "bg-muted-foreground/50"}`}/>{state}</p></div></div></td>
               <td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td>
               <td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen && <InfoChip>{f.screen}</InfoChip>}{f.browser_version && <InfoChip>{f.browser_version}</InfoChip>}</div><p className="mt-2 text-xs text-muted-foreground">{f.device || "Browser not recorded"}</p></td>
-              <td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite <span className="font-medium text-foreground">{favorite.game}</span> · {formatDuration(favorite.seconds)}</p> : <p className="mt-1 text-xs text-muted-foreground">No game history yet</p>}<div className="mt-2 h-1.5 w-32 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${favorite ? Math.min(100, Math.max(8, favorite.seconds / Math.max(1, f.total_play_seconds + live) * 100)) : 0}%` }}/></div></td>
+              <td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite <span className="font-medium text-foreground">{favorite.game}</span> · {formatDuration(favorite.seconds)}</p> : <p className="mt-1 text-xs text-muted-foreground">No game history yet</p>}<div className="mt-2 h-1.5 w-32 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${favorite ? Math.min(100, Math.max(8, favorite.seconds / Math.max(1, f.total_play_seconds + live) * 100)) : 0}%` }} /></div></td>
               <td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-1"><Button variant="outline" size="sm" className={btn} aria-label={`Copy browser ID for ${f.name}`} onClick={() => copyText(f.device_id ?? "", "Browser ID copied")}><Copy className="mr-1 h-3 w-3"/>Copy</Button><Button variant="outline" size="sm" className={btn} aria-label={`Ban ${f.name}'s browser`} onClick={() => banDevice(f.device_id ?? "", f.name)}><Ban className="mr-1 h-3 w-3"/>Ban</Button></div></div> : <span className="text-muted-foreground">Not recorded</span>}</td>
               <td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "Add private note"} onClick={() => openEditor({ kind: "note", friend: f, value: f.admin_note ?? "" })}>{f.admin_note || "Add private note…"}</button></td>
             </tr>;
@@ -345,10 +416,10 @@ function editorDescription(editor: Editor | null) {
 }
 function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?"; }
 function StatChip({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) { return <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-3"><span className="text-muted-foreground">{icon}</span><div><p className="text-lg font-bold tabular-nums">{value}</p><p className="text-xs text-muted-foreground">{label}</p></div></div>; }
-function StatCard({ label, value, detail, accent }: { label: string; value: number; detail: string; accent: string }) { return <article className="rounded-xl border border-border bg-background p-4"><p className="text-sm text-muted-foreground">{label}</p><p className={`mt-2 text-3xl font-bold tabular-nums ${accent}`}>{value}</p><p className="mt-1 text-xs text-muted-foreground">{detail}</p></article>; }
-function InfoChip({ children }: { children: React.ReactNode }) { return <span className="inline-flex max-w-full items-center rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">{children}</span>; }
-function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent"}`}>{children}</button>; }
-function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="mt-5 rounded-xl border border-dashed border-border px-5 py-10 text-center"><p className="font-semibold">{title}</p><p className="mt-1 text-sm text-muted-foreground">{detail}</p></div>; }
+function StatCard({ label, value, detail, accent }: { label: string; value: number; detail: string; accent: string }) { return <article className="rounded-xl border border-border bg-background p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm text-muted-foreground">{label}</p><p className={`mt-2 text-3xl font-bold ${accent}`}>{value}</p></div><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">Live</span></div><p className="mt-2 text-xs text-muted-foreground">{detail}</p></article>; }
+function InfoChip({ children }: { children: React.ReactNode }) { return <span className="inline-flex max-w-full items-center rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-foreground">{children}</span>; }
+function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`rounded-full border px-2.5 py-1.5 text-xs font-medium transition ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}>{children}</button>; }
+function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="mt-5 rounded-xl border border-dashed border-border px-5 py-10 text-center"><p className="font-semibold">{title}</p><p className="mt-2 text-sm text-muted-foreground">{detail}</p></div>; }
 
 function AdminGate() {
   const router = useRouter();
@@ -363,9 +434,9 @@ function AdminGate() {
     if (ok) { sessionStorage.setItem("admin-tab", "1"); sessionStorage.setItem("gate-tab", "1"); await router.invalidate(); }
     else await router.navigate({ to: "/geometry" });
   }
-  return <div className="min-h-screen bg-background p-8 font-serif text-foreground"><h1 className="text-center text-3xl font-bold">404 Not Found</h1><hr className="my-4 border-border"/><p className="text-center">nginx/1.24.0 <Button variant="ghost" type="button" aria-label="." onClick={() => setOpen((value) => !value)} className="h-auto rounded-none p-0 font-serif text-base cursor-default hover:bg-transparent">.</Button></p>{open && <form onSubmit={onSubmit} className="mx-auto mt-10 flex max-w-xs gap-2"><Input name="password" type="password" maxLength={200} autoFocus autoComplete="off"/><Button variant="outline" size="sm" type="submit" aria-label="Submit password">→</Button></form>}</div>;
+  return <div className="min-h-screen bg-background p-8 font-serif text-foreground"><h1 className="text-center text-3xl font-bold">404 Not Found</h1><hr className="my-4 border-border"/><p className="mx-auto max-w-xl text-center text-muted-foreground">This page is protected. Sign in from a Chromebook device to access the admin workspace.</p><div className="mx-auto mt-8 max-w-sm rounded-xl border border-border bg-card p-6 shadow-sm"><form onSubmit={onSubmit} className="space-y-4"><label className="block text-sm font-medium">Admin password<Input type="password" name="password" autoFocus className="mt-1" placeholder="Enter admin password" required/></label><Button type="submit" className="w-full">Open admin</Button></form></div></div>;
 }
 function DeviceControls({ id, onBan, onCopy }: { id: string; onBan: () => Promise<void>; onCopy?: () => Promise<void> }) {
   const [copied, setCopied] = useState(false);
-  return <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs"><code className="break-all">{id}</code><Button variant="ghost" size="icon" className="h-7 w-7" title={copied ? "Copied" : "Copy Device ID"} aria-label="Copy Device ID" onClick={async () => { if (onCopy) await onCopy(); else await navigator.clipboard.writeText(id); setCopied(true); }}><Copy /></Button><Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Ban Device" aria-label="Ban Device" onClick={() => void onBan()}><Ban /></Button></div>;
+  return <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs"><code className="break-all">{id}</code><Button variant="ghost" size="icon" className="h-7 w-7" title={copied ? "Copied" : "Copy browser ID"} onClick={async () => { if (onCopy) { await onCopy(); setCopied(true); setTimeout(() => setCopied(false), 1200); } }}><Copy className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-7 w-7" title="Ban browser" onClick={() => void onBan()}><Ban className="h-3.5 w-3.5" /></Button></div>;
 }
