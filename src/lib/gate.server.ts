@@ -108,13 +108,13 @@ export async function enforceChromebook(deviceId?: string) {
     return false;
   }
 
+  await logActivity("tripwire", `TRIPWIRE: Non-Chromebook attempted access (${d.device}). Initiating lockdown and kicking all users.`, deviceId);
   await evictUsers(true);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   if (deviceId && DEVICE_ID_PATTERN.test(deviceId)) {
     const { error } = await supabaseAdmin.from("banned_devices").upsert({ device_id: deviceId, note: "Tripwire: Non-Chromebook attempt" });
     if (error) throw new Error("Could not ban browser");
   }
-  await logActivity("tripwire", `TRIPWIRE: Non-Chromebook attempted access (${d.device}). Initiated lockdown and kicked all users.`, deviceId);
   await session.update({
     ...session.data,
     unlocked: false,
