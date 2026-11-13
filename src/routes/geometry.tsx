@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getGeometryTripwireNotice } from "@/lib/gate.functions";
 
 export const Route = createFileRoute("/geometry")({
+  loader: async () => {
+    const { message } = await getGeometryTripwireNotice();
+    return { tripwireNotice: message };
+  },
   head: () => ({
     meta: [
       { title: "Geometry Class Toolkit" },
@@ -146,7 +151,23 @@ const problemSteps = [
 ];
 
 function Geometry() {
+  const { tripwireNotice } = Route.useLoaderData();
+  const [notice, setNotice] = useState<string | null>(tripwireNotice);
   const [shape, setShape] = useState<Shape>("circle");
+
+  useEffect(() => {
+    const carried = sessionStorage.getItem("gate-tripwire-notice");
+    if (carried) {
+      setNotice(carried);
+      sessionStorage.removeItem("gate-tripwire-notice");
+    } else setNotice(tripwireNotice);
+  }, [tripwireNotice]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
   const [values, setValues] = useState<string[]>([""]);
   const calculator = calculators[shape];
   const numbers = calculator.inputs.map((_, index) => Number(values[index] ?? ""));
@@ -160,6 +181,13 @@ function Geometry() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
+      {notice && <div role="status" aria-live="polite" className="fixed left-1/2 top-4 z-[100] flex w-[min(92vw,620px)] -translate-x-1/2 items-start justify-between gap-4 rounded-xl border border-destructive/30 bg-card px-4 py-3 text-card-foreground shadow-xl">
+        <div>
+          <p className="font-semibold">Access ended — Chromebook security check</p>
+          <p className="mt-1 text-sm text-muted-foreground">{notice}</p>
+        </div>
+        <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss security notice" className="rounded p-1 text-muted-foreground hover:bg-muted">×</button>
+      </div>}
       <div className="mx-auto max-w-5xl px-5 py-10 sm:px-8 sm:py-14">
         <header className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-primary">Geometry class toolkit</p>
