@@ -20,6 +20,9 @@ import {
   listBans,
   setBan,
   messageFriend,
+  messageOnlineFriend,
+  messageOnlineFriends,
+  messageAllFriends,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -69,7 +72,8 @@ type AdminTab = typeof tabs[number]["id"];
 type Friend = ReturnType<typeof Route.useLoaderData>["friends"][number];
 type Editor =
   | { kind: "add"; name: string }
-  | { kind: "rename" | "password" | "expiry" | "message" | "note"; friend: Friend; value: string; random?: boolean };
+  | { kind: "rename" | "password" | "expiry" | "message" | "note" | "online-message"; friend: Friend; value: string; random?: boolean }
+  | { kind: "broadcast-online" | "broadcast-all"; value: string };
 type ConfirmAction = { title: string; description: string; label: string; run: () => Promise<void> };
 type ActivityFilter = "all" | "failed" | "success" | "admin";
 type RosterFilter = "all" | "playing" | "hub" | "offline" | "banned";
@@ -81,6 +85,9 @@ function Admin() {
   const panic = useServerFn(globalPanic);
   const access = useServerFn(checkAdminAccess);
   const note = useServerFn(messageFriend);
+  const onlineNote = useServerFn(messageOnlineFriend);
+  const sendOnline = useServerFn(messageOnlineFriends);
+  const sendAll = useServerFn(messageAllFriends);
   const addFriend = useServerFn(createFriend);
   const removeFriend = useServerFn(deleteFriend);
   const kick = useServerFn(kickFriend);
@@ -169,6 +176,18 @@ function Admin() {
       } else if (editor.kind === "message") {
         await note({ data: { id: editor.friend.id, message: editor.value } });
         toast.success("Message sent");
+      } else if (editor.kind === "online-message") {
+        const result = await onlineNote({ data: { id: editor.friend.id, message: editor.value } });
+        if (!result.ok) throw new Error(result.error);
+        toast.success(`Message sent to ${editor.friend.name}`);
+      } else if (editor.kind === "broadcast-online") {
+        const result = await sendOnline({ data: { message: editor.value } });
+        if (!result.ok) throw new Error("Could not broadcast to online players");
+        toast.success(`Message sent to ${result.sent} online player${result.sent === 1 ? "" : "s"}`);
+      } else if (editor.kind === "broadcast-all") {
+        const result = await sendAll({ data: { message: editor.value } });
+        if (!result.ok) throw new Error("Could not broadcast to friend accounts");
+        toast.success(`Broadcast sent to ${result.sent} account${result.sent === 1 ? "" : "s"}`);
       } else {
         let patch: Omit<Parameters<typeof editFriend>[0]["data"], "id">;
         if (editor.kind === "rename") patch = { name: editor.value };
@@ -203,13 +222,6 @@ function Admin() {
     try { await navigator.clipboard.writeText(value); toast.success(label); }
     catch { toast.error("Clipboard access was unavailable."); }
   }
-  async function messageOnlineFriends(template: string) {
-    const targets = onlineFriends.map((friend) => friend.id);
-    if (!targets.length) { toast.error("No players are currently online."); return; }
-    await Promise.all(targets.map((id) => note({ data: { id, message: template } })));
-    toast.success(`Sent message to ${targets.length} online player${targets.length === 1 ? "" : "s"}`);
-    await refresh();
-  }
   async function kickOnlineFriends() {
     const targets = onlineFriends.map((friend) => friend.id);
     if (!targets.length) { toast.error("No players are currently online."); return; }
@@ -222,12 +234,6 @@ function Admin() {
     if (!targets.length) { toast.error("No players are currently online."); return; }
     await Promise.all(targets.map((id) => editFriend({ data: { id, paused: true } })));
     toast.success(`Paused ${targets.length} online player${targets.length === 1 ? "" : "s"}`);
-    await refresh();
-  }
-  async function broadcastToAll(message: string) {
-    if (!friends.length) { toast.error("No friend accounts exist yet."); return; }
-    await Promise.all(friends.map((friend) => note({ data: { id: friend.id, message } })));
-    toast.success(`Broadcast sent to ${friends.length} accounts`);
     await refresh();
   }
   async function resetAllSessions() {
