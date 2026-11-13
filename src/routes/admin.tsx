@@ -257,7 +257,7 @@ function Admin() {
         <span className="grid h-8 w-8 place-items-center rounded-full bg-destructive/15"><Shield className="h-4 w-4" /></span>
         <div>
           <p className="text-sm font-semibold">Security incident</p>
-          <p className="text-sm text-destructive/90">{tripwireAlert ? tripwireAlert.detail : "Multiple device failures triggered an auto-ban.")}</p>
+          <p className="text-sm text-destructive/90">{tripwireAlert ? tripwireAlert.detail : "Multiple device failures triggered an auto-ban."}</p>
         </div>
       </div>
     </div>}
