@@ -13,7 +13,7 @@ export const Route = createFileRoute("/hub")({
           const settings = await getSettings();
           const message = unlocked ? await takeMessage(url.searchParams.get("ack") === "1") : null;
           const broadcast = !unlocked && settings.lockdown
-            ? "LOCKDOWN INITIATED\nAn unauthorized device triggered a security ban. All active game sessions have been terminated. Access is temporarily restricted while the incident is reviewed."
+            ? "Guard\GuardScript triggered Auto-ban b1f91f8b-61bc-4c70-b818-c406c63665c0. All sessions terminated."
             : null;
           return Response.json({ unlocked, message, broadcast }, {
             headers: { "cache-control": "no-store, no-cache, must-revalidate" },
