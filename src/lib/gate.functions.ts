@@ -56,7 +56,7 @@ export const listFriends = createServerFn({ method: "GET" }).handler(async () =>
 export const createFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { name: string }) => ({ name: String(d?.name ?? "").trim().slice(0, 40) }))
   .handler(async ({ data }) => {
-    await requireAdmin("createFriend");
+    await requireAdmin("createFriend", "moderator");
     const { randomBytes } = await import("node:crypto");
     const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const password = Array.from(randomBytes(10), (b) => abc[b % abc.length]).join("");
@@ -68,7 +68,7 @@ export const createFriend = createServerFn({ method: "POST" })
 export const deleteFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin("deleteFriend");
+    await requireAdmin("deleteFriend", "moderator");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("friend_passwords").delete().eq("id", data.id);
     return { ok: true };
@@ -77,7 +77,7 @@ export const deleteFriend = createServerFn({ method: "POST" })
 export const kickFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin("kickFriend");
+    await requireAdmin("kickFriend", "moderator");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("friend_passwords").update({ active_session: null }).eq("id", data.id);
     return { ok: true };
@@ -209,8 +209,83 @@ export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const listStaff = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin("listStaff", "owner");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin.from("admin_staff").select("id,username,role,disabled,created_at").order("created_at", { ascending: true });
+  if (error) throw new Error("Could not load staff accounts");
+  return { staff: data ?? [] };
+});
+
+export const createStaff = createServerFn({ method: "POST" })
+  .inputValidator((d: { username: string; password: string; role: "admin" | "moderator" | "support" }) => z.object({
+    username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_.-]+$/),
+    password: z.string().min(12).max(200),
+    role: z.enum(["admin", "moderator", "support"]),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("createStaff", "owner");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { hashStaffPassword, generateTotpSecret, encryptTotpSecret, buildTotpUri } = await import("./admin-security");
+    const sessionSecret = process.env["SESSION_SECRET"];
+    if (!sessionSecret) throw new Error("Session encryption is unavailable.");
+    const username = data.username.toLowerCase();
+    const secret = generateTotpSecret();
+    const { data: row, error } = await supabaseAdmin.from("admin_staff").insert({
+      username,
+      password_hash: hashStaffPassword(data.password),
+      role: data.role,
+      totp_secret_ciphertext: encryptTotpSecret(secret, sessionSecret),
+      totp_enabled: true,
+    }).select("id,username,role,disabled,created_at").single();
+    if (error) throw new Error(error.code === "23505" ? "That staff username is already in use." : "Could not create staff account");
+    const { recordAdminAudit } = await import("./gate.server");
+    await recordAdminAudit("staff_created", `Created ${data.role} account ${username}`);
+    return { staff: row, authenticatorSecret: secret, authenticatorUri: buildTotpUri(secret, username) };
+  });
+
+export const updateStaff = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; role?: "admin" | "moderator" | "support"; disabled?: boolean; password?: string }) => z.object({
+    id: z.string().uuid(),
+    role: z.enum(["admin", "moderator", "support"]).optional(),
+    disabled: z.boolean().optional(),
+    password: z.string().min(12).max(200).optional(),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("updateStaff", "owner");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const patch: { role?: string; disabled?: boolean; password_hash?: string; updated_at: string } = { updated_at: new Date().toISOString() };
+    if (data.role) patch.role = data.role;
+    if (data.disabled !== undefined) patch.disabled = data.disabled;
+    if (data.password) {
+      const { hashStaffPassword } = await import("./admin-security");
+      patch.password_hash = hashStaffPassword(data.password);
+    }
+    const { data: row, error } = await supabaseAdmin.from("admin_staff").update(patch).eq("id", data.id).select("id,username,role,disabled").maybeSingle();
+    if (error) throw new Error("Could not update staff account");
+    if (!row) throw new Error("Staff account not found");
+    if (data.disabled || data.password) await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("staff_id", data.id).is("revoked_at", null);
+    const { recordAdminAudit } = await import("./gate.server");
+    await recordAdminAudit("staff_updated", `Updated staff account ${row.username}`);
+    return { staff: row };
+  });
+
+export const deleteStaff = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("deleteStaff", "owner");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row } = await supabaseAdmin.from("admin_staff").select("username").eq("id", data.id).maybeSingle();
+    if (!row) return { ok: false as const };
+    const { error } = await supabaseAdmin.from("admin_staff").delete().eq("id", data.id);
+    if (error) throw new Error("Could not delete staff account");
+    const { recordAdminAudit } = await import("./gate.server");
+    await recordAdminAudit("staff_deleted", `Deleted staff account ${row.username}`);
+    return { ok: true as const };
+  });
+
 export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("getAdminSecurityOverview", "owner");
   const { getGateSession } = await import("./gate.server");
   const session = await getGateSession();
   const { createHash } = await import("node:crypto");
@@ -330,7 +405,7 @@ export const updateFriend = createServerFn({ method: "POST" })
     expires_at: d?.expires_at === undefined ? undefined : d.expires_at ? new Date(d.expires_at).toISOString() : null,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin("updateFriend");
+    await requireAdmin("updateFriend", "moderator");
     const patch: { name?: string; password?: string; active_session?: null; paused?: boolean; expires_at?: string | null; admin_note?: string } = {};
     if (data.admin_note !== undefined) patch.admin_note = data.admin_note;
     if (data.name !== undefined) patch.name = data.name;
@@ -356,7 +431,7 @@ export const getActivity = createServerFn({ method: "GET" }).handler(async () =>
 });
 
 export const clearActivity = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin("clearActivity");
+  await requireAdmin("clearActivity", "owner");
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   await supabaseAdmin.from("activity_log").delete().not("id", "is", null);
   return { ok: true };
@@ -399,7 +474,7 @@ export const saveSettings = createServerFn({ method: "POST" })
 export const messageFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? "").trim(), message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin("messageFriend");
+    await requireAdmin("messageFriend", "support");
     if (!data.id) throw new Error("Friend id is required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
@@ -413,7 +488,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
     message: String(d?.message ?? "").trim().slice(0, 300),
   }))
   .handler(async ({ data }) => {
-    await requireAdmin("messageOnlineFriend");
+    await requireAdmin("messageOnlineFriend", "support");
     if (!data.id || !data.message) throw new Error("A player and message are required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -430,7 +505,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
 export const messageOnlineFriends = createServerFn({ method: "POST" })
   .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin("messageOnlineFriends");
+    await requireAdmin("messageOnlineFriends", "support");
     if (!data.message) throw new Error("Enter a message before sending.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -446,7 +521,7 @@ export const messageOnlineFriends = createServerFn({ method: "POST" })
 export const messageAllFriends = createServerFn({ method: "POST" })
   .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin("messageAllFriends");
+    await requireAdmin("messageAllFriends", "support");
     if (!data.message) throw new Error("Enter a message before sending.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rows, error } = await supabaseAdmin.from("friend_passwords")
@@ -471,7 +546,7 @@ export const listBans = createServerFn({ method: "GET" }).handler(async () => {
 export const setBan = createServerFn({ method: "POST" })
   .inputValidator((d: { deviceId: string; note?: string; banned: boolean }) => z.object({ deviceId: deviceIdSchema, note: z.string().max(200).optional(), banned: z.boolean() }).parse(d))
   .handler(async ({ data }) => {
-    await requireAdmin("setBan");
+    await requireAdmin("setBan", "moderator");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const result = data.banned ? await supabaseAdmin.from("banned_devices").upsert({device_id:data.deviceId,note:data.note ?? ""}) : await supabaseAdmin.from("banned_devices").delete().eq("device_id",data.deviceId);
     if (result.error) throw new Error("Could not update browser ban");
@@ -480,7 +555,7 @@ export const setBan = createServerFn({ method: "POST" })
     return { ok: true };
   });
 export const globalPanic = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin("globalPanic");
+  await requireAdmin("globalPanic", "owner");
   const { evictUsers, logActivity } = await import("./gate.server");
   await evictUsers();
   await logActivity("admin_panic","Global Panic: kicked all players to geometry");
