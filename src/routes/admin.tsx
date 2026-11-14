@@ -28,6 +28,9 @@ import {
   messageOnlineFriend,
   messageOnlineFriends,
   messageAllFriends,
+  getPlayerManagementData,
+  moderatePlayer,
+  reviewPlayerAppeal,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -41,7 +44,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, KeyRound, LayoutDashboard, LockKeyhole, Search, Shield, Users, X } from "lucide-react";
+import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, Users, X } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
@@ -57,8 +60,8 @@ export const Route = createFileRoute("/admin")({
   loader: async () => {
     const { allowed } = await checkAdminAccessServer();
     if (!allowed) throw redirect({ to: "/geometry" });
-    const [codes, friends, activity, bans] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans()]);
-    return { ...codes, ...friends, ...activity, ...bans };
+    const [codes, friends, activity, bans, management] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans(), getPlayerManagementData()]);
+    return { ...codes, ...friends, ...activity, ...bans, management };
   },
   component: Admin,
 });
@@ -69,6 +72,8 @@ const tabs = [
   { id: "dashboard", label: "Overview", icon: LayoutDashboard },
   { id: "players", label: "Player roster", icon: Gamepad2 },
   { id: "friends", label: "Friend accounts", icon: Users },
+  { id: "moderation", label: "Moderation & appeals", icon: Gavel },
+  { id: "messages", label: "Message history", icon: MessageSquare },
   { id: "access", label: "Access codes", icon: KeyRound },
   { id: "security", label: "Security Center", icon: Shield },
   { id: "activity", label: "Activity audit", icon: Activity },
@@ -84,7 +89,7 @@ type ActivityFilter = "all" | "failed" | "success" | "admin";
 type RosterFilter = "all" | "playing" | "hub" | "offline" | "banned";
 
 function Admin() {
-  const { admin, codes, friends, log, settings, bans } = Route.useLoaderData();
+  const { admin, codes, friends, log, settings, bans, management } = Route.useLoaderData();
   const router = useRouter();
   const ban = useServerFn(setBan);
   const panic = useServerFn(globalPanic);
@@ -104,6 +109,8 @@ function Admin() {
   const lock = useServerFn(lockAdmin);
   const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
   const revokeSession = useServerFn(revokeAdminSession);
+  const moderate = useServerFn(moderatePlayer);
+  const reviewAppeal = useServerFn(reviewPlayerAppeal);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
@@ -118,6 +125,8 @@ function Admin() {
   const [rosterFilter, setRosterFilter] = useState<RosterFilter>("all");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [visiblePasswords, setVisiblePasswords] = useState<string[]>([]);
+  const [selectedPlayer, setSelectedPlayer] = useState<Friend | null>(null);
+  const [moderationDraft, setModerationDraft] = useState<{ friend: Friend; duration: "1h" | "24h" | "7d" | "permanent"; reason: string } | null>(null);
 
   useEffect(() => {
     access({ data: { deviceId: getBrowserDeviceId() } }).then((result) => {
@@ -343,9 +352,21 @@ function Admin() {
             if (live && f.current_game) play[f.current_game] = (play[f.current_game] ?? 0) + live;
             const favorite = topGame(play);
             const state = online ? f.current_game ? "Playing" : "On hub" : "Offline";
-            return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-xs text-muted-foreground">{f.password ? "Account active" : "Passwordless"}</p></div></div></td><td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td><td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen ? <InfoChip>{f.screen}</InfoChip> : <InfoChip>Display hidden</InfoChip>}</div></td><td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite: {favorite.game}</p> : <p className="mt-1 text-xs text-muted-foreground">No play stats yet</p>}</td><td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-2"><Button variant="ghost" size="sm" onClick={() => void copyText(f.device_id ?? "", "Browser ID copied")}>Copy</Button><Button variant="outline" size="sm" onClick={() => void banDevice(f.device_id ?? "")}>Ban</Button></div></div> : <span className="text-muted-foreground">No browser ID</span>}</td><td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "No private note"}>{f.admin_note || "No private note"}</button></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2">{online ? <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></> : <span className="text-xs text-muted-foreground">Offline</span>}</div></td></tr>;
+            return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-xs text-muted-foreground">{f.password ? "Account active" : "Passwordless"}</p></div></div></td><td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td><td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen ? <InfoChip>{f.screen}</InfoChip> : <InfoChip>Display hidden</InfoChip>}</div></td><td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite: {favorite.game}</p> : <p className="mt-1 text-xs text-muted-foreground">No play stats yet</p>}</td><td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-2"><Button variant="ghost" size="sm" onClick={() => void copyText(f.device_id ?? "", "Browser ID copied")}>Copy</Button><Button variant="outline" size="sm" onClick={() => void banDevice(f.device_id ?? "")}>Ban</Button></div></div> : <span className="text-muted-foreground">No browser ID</span>}</td><td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "No private note"}>{f.admin_note || "No private note"}</button></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setSelectedPlayer(f)}>Profile</Button><Button variant="outline" size="sm" onClick={() => setModerationDraft({ friend: f, duration: "24h", reason: "" })}>Suspend</Button>{online && <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></>}</div></td></tr>;
           })}
         </tbody></table></div>
+      </section>}
+
+      {tab === "moderation" && <section className="space-y-7">
+        <div><h2 className="text-lg font-semibold">Player appeals</h2><p className="mt-1 text-sm text-muted-foreground">Review suspension appeals submitted by players. Approving an appeal lifts matching active suspensions.</p></div>
+        {management.appeals.filter((appeal) => appeal.status === "pending").length === 0 ? <EmptyState title="No pending appeals" detail="New player appeals will appear here." /> : <div className="grid gap-3 lg:grid-cols-2">{management.appeals.filter((appeal) => appeal.status === "pending").map((appeal) => <article key={appeal.id} className="rounded-xl border border-border p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{appeal.player_name}</h3><p className="text-xs text-muted-foreground">Submitted {when(appeal.created_at)}</p></div><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">Pending</span></div><p className="mt-3 whitespace-pre-wrap text-sm">{appeal.reason}</p><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => void perform("Appeal approved and active suspension lifted", () => reviewAppeal({ data: { id: appeal.id, decision: "approved" } }))}><Check className="mr-1 h-4 w-4" />Approve appeal</Button><Button size="sm" variant="destructive" onClick={() => void perform("Appeal denied", () => reviewAppeal({ data: { id: appeal.id, decision: "denied" } }))}>Deny appeal</Button></div></article>)}</div>}
+        <div><h2 className="text-lg font-semibold">Suspension history</h2><p className="mt-1 text-sm text-muted-foreground">Temporary suspensions expire automatically; permanent suspensions remain until an appeal is approved or the record is otherwise lifted.</p></div>
+        {management.moderation.length === 0 ? <EmptyState title="No moderation actions yet" detail="Use Suspend from a player's profile or roster row to apply a temporary or permanent suspension." /> : <div className="overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[800px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr>{["Player ID", "Reason", "Duration", "Status", "Created"].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead><tbody>{management.moderation.map((item) => { const expired = !!item.expires_at && Date.parse(item.expires_at) <= Date.now(); const status = item.lifted_at ? "Lifted" : expired ? "Expired" : "Active"; return <tr key={item.id} className="border-t border-border"><td className="px-4 py-3 font-mono text-xs">{item.friend_id ?? item.device_id ?? "Unknown"}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3">{item.reason}</td><td className="px-4 py-3">{item.expires_at ? when(item.expires_at) : "Permanent"}</td><td className="px-4 py-3"><span className={status === "Active" ? "font-semibold text-destructive" : "text-muted-foreground"}>{status}</span></td><td className="px-4 py-3 text-muted-foreground">{when(item.created_at)}</td></tr>; })}</tbody></table></div>}
+        <div><h2 className="text-lg font-semibold">Reviewed appeals</h2><div className="mt-3 space-y-2">{management.appeals.filter((appeal) => appeal.status !== "pending").length === 0 ? <p className="text-sm text-muted-foreground">No appeals have been reviewed yet.</p> : management.appeals.filter((appeal) => appeal.status !== "pending").map((appeal) => <div key={appeal.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-4 py-3"><div><p className="font-medium">{appeal.player_name}</p><p className="text-xs text-muted-foreground">{appeal.admin_response || appeal.reason}</p></div><span className="text-xs font-semibold uppercase text-muted-foreground">{appeal.status}</span></div>)}</div></div>
+      </section>}
+
+      {tab === "messages" && <section><div className="mb-4"><h2 className="text-lg font-semibold">Message delivery history</h2><p className="mt-1 text-sm text-muted-foreground">Recent direct messages and broadcasts, including the number of player accounts targeted.</p></div>
+        {management.messages.length === 0 ? <EmptyState title="No message history" detail="Messages sent to players will appear here." /> : <div className="space-y-2">{management.messages.map((message) => <article key={message.id} className="rounded-xl border border-border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold uppercase">{message.target_type}</span><span className="font-medium">{message.target_label}</span></div><span className="text-xs text-muted-foreground">{when(message.created_at)} · {message.recipient_count} recipient{message.recipient_count === 1 ? "" : "s"}</span></div><p className="mt-3 whitespace-pre-wrap text-sm">{message.message}</p></article>)}</div>}
       </section>}
 
       {tab === "friends" && <section><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><p className="max-w-2xl text-sm text-muted-foreground">Manage player accounts, active check-ins, and account expiry.</p><Button variant="secondary" onClick={() => openEditor({ kind: "add", name: "" })}>Add account</Button></div>
@@ -432,6 +453,27 @@ function Admin() {
           {(editor?.kind === "broadcast-online" || editor?.kind === "broadcast-all") && <label className="block text-sm font-medium">{editor.kind === "broadcast-online" ? "Message to online players" : "Message to all friend accounts"}<Textarea autoFocus maxLength={300} className="mt-1 min-h-28" value={editor.value} onChange={(event) => setEditor({ ...editor, value: event.target.value })} /></label>}
           {editor?.kind === "note" && <label className="block text-sm font-medium">Private admin note for {editor.friend.name}<Textarea autoFocus maxLength={500} className="mt-1 min-h-28" value={editor.value} onChange={(event) => setEditor({ ...editor, value: event.target.value })} /></label>}
           <DialogFooter><Button type="button" variant="outline" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button></DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={!!selectedPlayer} onOpenChange={(open) => { if (!open) setSelectedPlayer(null); }}>
+      <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Player profile · {selectedPlayer?.name}</DialogTitle><DialogDescription>Account, session, device, and playtime details.</DialogDescription></DialogHeader>
+        {selectedPlayer && <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs uppercase text-muted-foreground">Account</p><p className="mt-1 font-semibold">{selectedPlayer.name}</p><p className="mt-1 text-xs text-muted-foreground">Created {when(selectedPlayer.created_at)}</p></div>
+          <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs uppercase text-muted-foreground">Session</p><p className="mt-1 font-semibold">{isFriendOnline(selectedPlayer, Date.now()) ? selectedPlayer.current_game || "On hub" : "Offline"}</p><p className="mt-1 text-xs text-muted-foreground">Last login {when(selectedPlayer.last_login)} · Last seen {when(selectedPlayer.last_seen)}</p></div>
+          <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs uppercase text-muted-foreground">Browser & device</p><p className="mt-1 text-sm">{selectedPlayer.device || "Unknown device"}</p><p className="mt-1 text-xs text-muted-foreground">{selectedPlayer.browser_version || "Browser unknown"} · {selectedPlayer.screen || "Display unavailable"}</p><p className="mt-1 break-all font-mono text-xs text-muted-foreground">{selectedPlayer.device_id || "No browser ID recorded"}</p></div>
+          <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs uppercase text-muted-foreground">Playtime</p><p className="mt-1 text-lg font-semibold">{formatDuration(selectedPlayer.total_play_seconds ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">CPU {selectedPlayer.cpu_cores ?? "?"} cores · RAM {selectedPlayer.memory_gb ?? "?"} GB</p></div>
+          <div className="sm:col-span-2 rounded-lg bg-muted/40 p-3"><p className="text-xs uppercase text-muted-foreground">Private admin note</p><p className="mt-1 whitespace-pre-wrap text-sm">{selectedPlayer.admin_note || "No note saved."}</p></div>
+        </div>}
+        <DialogFooter><Button variant="outline" onClick={() => setSelectedPlayer(null)}>Close</Button>{selectedPlayer && <Button variant="destructive" onClick={() => { setModerationDraft({ friend: selectedPlayer, duration: "24h", reason: "" }); setSelectedPlayer(null); }}>Suspend player</Button>}</DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={!!moderationDraft} onOpenChange={(open) => { if (!open && !saving) setModerationDraft(null); }}>
+      <DialogContent><DialogHeader><DialogTitle>Suspend {moderationDraft?.friend.name}</DialogTitle><DialogDescription>This blocks the account and its currently associated browser from signing in for the selected duration.</DialogDescription></DialogHeader>
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (!moderationDraft) return; void perform("Player suspension applied", async () => { await moderate({ data: { id: moderationDraft.friend.id, duration: moderationDraft.duration, reason: moderationDraft.reason } }); setModerationDraft(null); }); }}>
+          <label className="block text-sm font-medium">Duration<select className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3" value={moderationDraft?.duration ?? "24h"} onChange={(event) => setModerationDraft((current) => current ? { ...current, duration: event.target.value as "1h" | "24h" | "7d" | "permanent" } : current)}><option value="1h">1 hour</option><option value="24h">24 hours</option><option value="7d">7 days</option><option value="permanent">Permanent</option></select></label>
+          <label className="block text-sm font-medium">Reason<Textarea className="mt-1 min-h-24" minLength={5} maxLength={500} value={moderationDraft?.reason ?? ""} onChange={(event) => setModerationDraft((current) => current ? { ...current, reason: event.target.value } : current)} required /></label>
+          <DialogFooter><Button type="button" variant="outline" onClick={() => setModerationDraft(null)}>Cancel</Button><Button type="submit" variant="destructive" disabled={!moderationDraft || moderationDraft.reason.trim().length < 5}>Apply suspension</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

@@ -194,6 +194,24 @@ export type Database = {
         }
         Relationships: []
       }
+      player_moderation: {
+        Row: { id: string; friend_id: string | null; device_id: string | null; reason: string; expires_at: string | null; lifted_at: string | null; actor_role: string; created_at: string }
+        Insert: { id?: string; friend_id?: string | null; device_id?: string | null; reason?: string; expires_at?: string | null; lifted_at?: string | null; actor_role?: string; created_at?: string }
+        Update: { id?: string; friend_id?: string | null; device_id?: string | null; reason?: string; expires_at?: string | null; lifted_at?: string | null; actor_role?: string; created_at?: string }
+        Relationships: []
+      }
+      player_appeals: {
+        Row: { id: string; friend_id: string | null; device_id: string | null; player_name: string; reason: string; status: string; admin_response: string | null; created_at: string; reviewed_at: string | null; reviewed_by: string | null }
+        Insert: { id?: string; friend_id?: string | null; device_id?: string | null; player_name?: string; reason: string; status?: string; admin_response?: string | null; created_at?: string; reviewed_at?: string | null; reviewed_by?: string | null }
+        Update: { id?: string; friend_id?: string | null; device_id?: string | null; player_name?: string; reason?: string; status?: string; admin_response?: string | null; created_at?: string; reviewed_at?: string | null; reviewed_by?: string | null }
+        Relationships: []
+      }
+      player_message_history: {
+        Row: { id: string; target_type: string; target_id: string | null; target_label: string; message: string; recipient_count: number; actor_role: string; created_at: string }
+        Insert: { id?: string; target_type: string; target_id?: string | null; target_label?: string; message: string; recipient_count?: number; actor_role?: string; created_at?: string }
+        Update: { id?: string; target_type?: string; target_id?: string | null; target_label?: string; message?: string; recipient_count?: number; actor_role?: string; created_at?: string }
+        Relationships: []
+      }
       site_settings: {
         Row: {
           hidden_games: string[]

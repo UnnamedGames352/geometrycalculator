@@ -83,5 +83,6 @@ function FakeError() {
       <input name="code" type="text" maxLength={200} autoFocus autoComplete="off" className="min-w-0 flex-1 border border-border bg-background px-2 py-1 text-sm" />
       <Button variant="outline" disabled={!deviceId} type="submit" aria-label="Submit code" className="border border-border px-3 text-sm">→</Button>
     </form>}
+    <p className="mt-8 text-center text-xs text-muted-foreground"><a href="/appeal" className="underline underline-offset-4 hover:text-foreground">Player suspension appeal</a></p>
   </div>;
 }
