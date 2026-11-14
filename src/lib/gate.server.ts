@@ -171,6 +171,7 @@ export async function startAdminSession(session: Awaited<ReturnType<typeof getGa
     ...session.data, unlocked: true, admin: true, adminSessionToken: token,
     adminRole: "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
     deviceId, at: Date.now(), friendId: undefined, token: undefined,
+    tripwireNotice: false, tripwireNoticeShown: true,
   });
   await recordAdminAudit("admin_session_created", "Administrator session created");
 }
@@ -205,10 +206,8 @@ export async function isAdmin() {
       .eq("session_token_hash", hash).is("revoked_at", null);
     await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
   };
-  if (!(await enforceChromebook(deviceId)) || await isDeviceBanned(deviceId)) {
-    await invalidateSession();
-    return false;
-  }
+  // Owner access is protected by the admin password and TOTP, not the player Chromebook gate.
+  // Device bans and the Chromebook tripwire apply to player sessions only.
   const { data, error } = await supabaseAdmin.from("admin_sessions")
     .select("id,role,expires_at,revoked_at,last_seen_at")
     .eq("session_token_hash", hash).maybeSingle();
@@ -229,9 +228,9 @@ export async function isAdmin() {
 export async function isUnlocked(opts: { markSeen?: boolean } = {}) {
   const s = await getGateSession();
   if (!s.data.unlocked) return false;
+  if (s.data.admin) return isAdmin();
   if (!(await enforceChromebook(s.data.deviceId))) return false;
   if (!s.data.deviceId) return false;
-  if (s.data.admin) return isAdmin();
   const settings = await getSettings();
   if (settings.lockdown) return false;
   if (settings.kick_all_at && (s.data.at ?? 0) < new Date(settings.kick_all_at).getTime()) return false;
