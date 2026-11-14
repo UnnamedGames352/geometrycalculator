@@ -40,7 +40,7 @@ export async function getSettings(): Promise<SiteSettings> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, lockdown_level, hidden_games, kick_all_at, broadcast_message").eq("id", 1).maybeSingle();
   if (error) throw new Error("Could not check site settings");
-  return data ?? { lockdown: false, lockdown_level: 0, hidden_games: [], kick_all_at: null, broadcast_message: null };
+  return data ?? { lockdown: false, lockdown_level: 1, hidden_games: [], kick_all_at: null, broadcast_message: null };
 }
 
 // Every activity entry includes the browser ID when one has been assigned, so an
