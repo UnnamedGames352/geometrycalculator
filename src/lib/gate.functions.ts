@@ -88,24 +88,10 @@ export const checkAdminSession = createServerFn({ method: "GET" }).handler(async
   return { admin: await isAdmin() };
 });
 
-export const checkAdminAccessServer = createServerFn({ method: "GET" }).handler(async () => {
-  const { enforceChromebook, getGateSession } = await import("./gate.server");
-  return { allowed: await enforceChromebook((await getGateSession()).data.deviceId) };
-});
-
-export const checkAdminAccess = createServerFn({ method: "POST" })
-  .inputValidator((d: { deviceId: string }) => z.object({ deviceId: deviceIdSchema }).parse(d))
-  .handler(async ({ data }) => {
-    const { enforceChromebook, isDeviceBanned } = await import("./gate.server");
-    return { allowed: await enforceChromebook(data.deviceId) && !(await isDeviceBanned(data.deviceId)) };
-  });
-
 export const adminLogin = createServerFn({ method: "POST" })
   .inputValidator((d: { password: string; deviceId: string }) => z.object({ password: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
   .handler(async ({ data }) => {
-    const { getGateSession, passwordMatches, enforceChromebook, isDeviceBanned, failedAttempt, logActivity } = await import("./gate.server");
-    if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook admin login rejected",data.deviceId,data.password); return { ok: false as const }; }
-    if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted admin login",data.deviceId,data.password); return { ok: false as const }; }
+    const { getGateSession, passwordMatches, failedAttempt, logActivity } = await import("./gate.server");
     const expected = process.env["SITE_PASSWORD"];
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
     const session = await getGateSession();

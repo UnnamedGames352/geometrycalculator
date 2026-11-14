@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
@@ -8,8 +8,6 @@ import {
   beginAdminTwoFactorSetup,
   confirmAdminTwoFactorSetup,
   verifyAdminTwoFactor,
-  checkAdminAccess,
-  checkAdminAccessServer,
   globalPanic,
   clearActivity,
   getActivity,
@@ -55,8 +53,6 @@ export const Route = createFileRoute("/admin")({
     { name: "robots", content: "noindex" },
   ] }),
   loader: async () => {
-    const { allowed } = await checkAdminAccessServer();
-    if (!allowed) throw redirect({ to: "/geometry" });
     const [codes, friends, activity, bans] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans()]);
     return { ...codes, ...friends, ...activity, ...bans };
   },
@@ -88,7 +84,6 @@ function Admin() {
   const router = useRouter();
   const ban = useServerFn(setBan);
   const panic = useServerFn(globalPanic);
-  const access = useServerFn(checkAdminAccess);
   const note = useServerFn(messageFriend);
   const onlineNote = useServerFn(messageOnlineFriend);
   const sendOnline = useServerFn(messageOnlineFriends);
@@ -105,7 +100,6 @@ function Admin() {
   const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
   const revokeSession = useServerFn(revokeAdminSession);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
-  const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
   const [tab, setTab] = useState<AdminTab>("dashboard");
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -119,12 +113,6 @@ function Admin() {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [visiblePasswords, setVisiblePasswords] = useState<string[]>([]);
 
-  useEffect(() => {
-    access({ data: { deviceId: getBrowserDeviceId() } }).then((result) => {
-      if (!result.allowed) void router.navigate({ to: "/geometry" });
-      else setAccessOk(true);
-    }).catch(() => { void router.navigate({ to: "/geometry" }); });
-  }, []);
   useEffect(() => {
     const ok = sessionStorage.getItem("admin-tab") === "1";
     setTabOk(ok);
@@ -140,7 +128,7 @@ function Admin() {
     loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
   }, [admin, tabOk, tab]);
 
-  if (!accessOk || (admin && tabOk === null)) return null;
+  if (admin && tabOk === null) return null;
   if (!admin || !tabOk) return <AdminGate />;
 
   const refresh = () => router.invalidate();
