@@ -71,11 +71,11 @@ function encodeBase32(input: Buffer) {
     value = (value << 8) | byte;
     bits += 8;
     while (bits >= 5) {
-      output += BASE32[(value >>> (bits - 5)) & 31];
+      output += BASE32[(value >>> (bits - 5)) & 31]!;
       bits -= 5;
     }
   }
-  if (bits > 0) output += BASE32[(value << (5 - bits)) & 31];
+  if (bits > 0) output += BASE32[(value << (5 - bits)) & 31]!;
   return output;
 }
 
