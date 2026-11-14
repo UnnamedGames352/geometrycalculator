@@ -259,7 +259,7 @@ async function requireAdmin(action = "admin_action", minimumRole: "support" | "m
   if (!(await isAdmin())) throw new Error("Not Found");
   const session = await getGateSession();
   const role = session.data.adminRole ?? "owner";
-  if ((ROLE_LEVEL[role] ?? 0) < ROLE_LEVEL[minimumRole]) throw new Error("Not Found");
+  if ((ROLE_LEVEL[role] ?? 0) < (ROLE_LEVEL[minimumRole] ?? 0)) throw new Error("Not Found");
   await recordAdminAudit(`${action}_started`, "Administrator action authorized");
 }
 
@@ -337,7 +337,7 @@ export const getActivity = createServerFn({ method: "GET" }).handler(async () =>
   const { getGateSession, getSettings } = await import("./gate.server");
   if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null } };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("activity_log").select("at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
+  const { data } = await supabaseAdmin.from("activity_log").select("id, at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
   return { log: data ?? [], settings: await getSettings() };
 });
 
