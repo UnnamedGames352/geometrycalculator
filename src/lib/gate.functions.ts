@@ -12,12 +12,14 @@ export const checkUnlocked = createServerFn({ method: "GET" }).handler(async () 
 export const redeemCode = createServerFn({ method: "POST" })
   .inputValidator((d: { code: string; deviceId: string; hardware?: unknown }) => ({ ...z.object({ code: z.string().max(200), deviceId: deviceIdSchema }).parse(d), hardware: parseHardware(d.hardware) }))
   .handler(async ({ data }) => {
-    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime } = await import("./gate.server");
+    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime, consumeSecurityRateLimit } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
     const platformSettings = await getSettings();
     if (platformSettings.lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
     if (platformSettings.emergency_level >= 2) { await logActivity("blocked", `Emergency protocol level ${platformSettings.emergency_level}: new player access restricted`, data.deviceId); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
+    const rateLimit = await consumeSecurityRateLimit("player_signin", data.deviceId, 12, 60, 600);
+    if (!rateLimit.allowed) { await logActivity("rate_limited", `Player sign-in rate limit active for ${rateLimit.retryAfterSeconds} seconds`, data.deviceId); return { ok: false as const }; }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
     const { data: deviceHold, error: deviceHoldError } = await supabaseAdmin.from("player_moderation")
@@ -116,9 +118,11 @@ export const checkAdminAccess = createServerFn({ method: "POST" })
 export const adminLogin = createServerFn({ method: "POST" })
   .inputValidator((d: { password: string; deviceId: string }) => z.object({ password: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
   .handler(async ({ data }) => {
-    const { getGateSession, passwordMatches, enforceChromebook, isDeviceBanned, failedAttempt, logActivity } = await import("./gate.server");
+    const { getGateSession, passwordMatches, enforceChromebook, isDeviceBanned, failedAttempt, logActivity, consumeSecurityRateLimit } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook admin login rejected",data.deviceId,data.password); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted admin login",data.deviceId,data.password); return { ok: false as const }; }
+    const rateLimit = await consumeSecurityRateLimit("admin_login", data.deviceId, 5, 60, 900);
+    if (!rateLimit.allowed) { await logActivity("rate_limited", `Admin sign-in rate limit active for ${rateLimit.retryAfterSeconds} seconds`, data.deviceId); return { ok: false as const }; }
     const expected = process.env["SITE_PASSWORD"];
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
     const session = await getGateSession();
