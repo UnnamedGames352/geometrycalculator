@@ -405,8 +405,7 @@ function Admin() {
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {[
-              { level: 0, name: "Normal", detail: "All player access is available." },
-              { level: 1, name: "Monitoring", detail: "Normal access; heightened security logging." },
+              { level: 1, name: "Normal", detail: "All player access is available." },
               { level: 2, name: "Guarded", detail: "Block new player sign-ins; current sessions continue." },
               { level: 3, name: "Restricted", detail: "Block player access to the games hub." },
               { level: 4, name: "Lockdown", detail: "Block access and terminate all active player sessions." },
