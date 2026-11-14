@@ -33,6 +33,7 @@ import {
   reviewPlayerAppeal,
   setEmergencyProtocol,
   getPlatformAnalytics,
+  updateSecurityAlertStatus,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -133,6 +134,7 @@ function Admin() {
   const reviewAppeal = useServerFn(reviewPlayerAppeal);
   const setEmergency = useServerFn(setEmergencyProtocol);
   const loadAnalytics = useServerFn(getPlatformAnalytics);
+  const updateAlertStatus = useServerFn(updateSecurityAlertStatus);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
@@ -180,6 +182,13 @@ function Admin() {
   useEffect(() => {
     if (!admin || !tabOk || tab !== "platform") return;
     loadAnalytics().then(setPlatformAnalytics).catch(() => setPlatformAnalytics(null));
+  }, [admin, tabOk, tab]);
+  useEffect(() => {
+    if (!admin || !tabOk || tab !== "security") return;
+    const timer = setInterval(() => {
+      loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
+    }, 15_000);
+    return () => clearInterval(timer);
   }, [admin, tabOk, tab]);
 
   if (!accessOk || (admin && tabOk === null)) return null;
@@ -473,6 +482,10 @@ function Admin() {
             <InfoChip>Failed-attempt auto-ban enabled</InfoChip>
             <InfoChip>{bans.length} banned browser IDs</InfoChip>
           </div>
+        </div>
+        <div className="mb-6 rounded-xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Security alerts</h3><p className="mt-1 text-sm text-muted-foreground">Automatically raised for rate-limit triggers, automatic bans, admin lockouts, and Chromebook tripwire events.</p></div><span className="rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive">{adminSecurity?.alerts.filter((alert) => alert.status === "open").length ?? 0} open</span></div>
+          {!adminSecurity || adminSecurity.alerts.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No security alerts have been raised.</p> : <div className="mt-4 space-y-2">{adminSecurity.alerts.map((alert) => <article key={alert.id} className="rounded-lg border border-border p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${alert.severity === "critical" ? "bg-destructive/10 text-destructive" : alert.severity === "high" ? "bg-chart-3/10 text-chart-3" : "bg-muted text-muted-foreground"}`}>{alert.severity}</span><span className="font-semibold">{alert.title}</span><span className="text-xs text-muted-foreground">{alert.status}</span></div><p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{alert.detail}</p><p className="mt-1 text-xs text-muted-foreground">{when(alert.created_at)}{alert.device_id ? ` · Device ${alert.device_id}` : ""}{alert.ip ? ` · IP ${alert.ip}` : ""}</p></div><div className="flex shrink-0 gap-2">{alert.status === "open" && <Button size="sm" variant="outline" onClick={() => void updateAlertStatus({ data: { id: alert.id, status: "acknowledged" } }).then(() => loadAdminSecurity()).then(setAdminSecurity).catch(() => toast.error("Could not acknowledge alert."))}>Acknowledge</Button>}{alert.status !== "resolved" && <Button size="sm" variant="outline" onClick={() => void updateAlertStatus({ data: { id: alert.id, status: "resolved" } }).then(() => loadAdminSecurity()).then(setAdminSecurity).catch(() => toast.error("Could not resolve alert."))}>Resolve</Button>}</div></div></article>)}</div>}
         </div>
         <div className="mb-6">
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Recent security events</h3><p className="mt-1 text-sm text-muted-foreground">Latest authentication, blocking, tripwire, and admin events.</p></div><Button variant="outline" size="sm" onClick={() => setTab("activity")}>Open full audit</Button></div>
