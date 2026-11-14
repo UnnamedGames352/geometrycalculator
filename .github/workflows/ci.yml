@@ -1,5 +1,7 @@
 name: CI
 
+# Validate each feature branch and pull request before review.
+
 on:
   push:
     branches: ["feature/**"]
