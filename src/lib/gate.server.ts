@@ -13,11 +13,11 @@ type GateSession = {
   at?: number;
   tripwireNotice?: boolean;
   tripwireNoticeShown?: boolean;
-  adminSessionToken?: string;
-  adminRole?: 'owner' | 'admin' | 'moderator' | 'support';
-  pendingAdminAuth?: boolean;
-  pendingAdminAttempts?: number;
-  pendingTotpSecret?: string;
+  adminSessionToken?: string | undefined;
+  adminRole?: 'owner' | 'admin' | 'moderator' | 'support' | undefined;
+  pendingAdminAuth?: boolean | undefined;
+  pendingAdminAttempts?: number | undefined;
+  pendingTotpSecret?: string | undefined;
 };
 
 const config = () => {
