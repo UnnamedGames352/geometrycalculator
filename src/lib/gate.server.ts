@@ -19,6 +19,7 @@ type GateSession = {
   pendingAdminAt?: number | undefined;
   pendingAdminAttempts?: number | undefined;
   pendingTotpSecret?: string | undefined;
+  pendingStaffId?: string | undefined;
 };
 
 const config = () => {
@@ -33,13 +34,13 @@ const config = () => {
 
 export const getGateSession = () => useSession<GateSession>(config());
 
-export type SiteSettings = { lockdown: boolean; hidden_games: string[]; kick_all_at: string | null };
+export type SiteSettings = { lockdown: boolean; lockdown_level: number; hidden_games: string[]; kick_all_at: string | null; broadcast_message: string | null };
 
 export async function getSettings(): Promise<SiteSettings> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, hidden_games, kick_all_at").eq("id", 1).maybeSingle();
+  const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, lockdown_level, hidden_games, kick_all_at, broadcast_message").eq("id", 1).maybeSingle();
   if (error) throw new Error("Could not check site settings");
-  return data ?? { lockdown: false, hidden_games: [], kick_all_at: null };
+  return data ?? { lockdown: false, lockdown_level: 1, hidden_games: [], kick_all_at: null, broadcast_message: null };
 }
 
 // Every activity entry includes the browser ID when one has been assigned, so an
@@ -58,7 +59,7 @@ export async function evictUsers(lockdown?: boolean) {
   if (error) throw new Error("Could not evict sessions");
 }
 
-const TRIPWIRE_NOTICE = "Access was stopped because this site only allows Chrome on ChromeOS (Chromebooks). The security tripwire placed the hub in lockdown and ended active player sessions. You are seeing this explanation instead of a crashed page.";
+const TRIPWIRE_NOTICE = "EMERGENCY LOCKDOWN — A confirmed security tripwire was detected. This browser has been banned, all active player sessions were terminated, and the site is in Level 5 lockdown.";
 
 async function latestEvictionEvent(): Promise<{ at: string; kind: string } | null> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -74,24 +75,29 @@ async function latestEvictionEvent(): Promise<{ at: string; kind: string } | nul
 
 export async function getTripwireBroadcast() {
   const session = await getGateSession();
-  if (session.data.tripwireNotice && !session.data.tripwireNoticeShown) return TRIPWIRE_NOTICE;
+  const settings = await getSettings();
+  const message = settings.broadcast_message ?? TRIPWIRE_NOTICE;
+  if (session.data.tripwireNotice && !session.data.tripwireNoticeShown) return message;
   if (session.data.tripwireNoticeShown || !session.data.at) return null;
   const event = await latestEvictionEvent();
-  return event?.kind === "tripwire" && Date.parse(event.at) > session.data.at ? TRIPWIRE_NOTICE : null;
+  const newerThanSession = !!event && Date.parse(event.at) > session.data.at;
+  return newerThanSession && (event.kind === "tripwire" || settings.lockdown_level === 5) ? message : null;
 }
 
 export async function takeTripwireNotice() {
   const session = await getGateSession();
+  const settings = await getSettings();
+  const message = settings.broadcast_message ?? TRIPWIRE_NOTICE;
   if (session.data.tripwireNoticeShown) return null;
   if (session.data.tripwireNotice) {
     await session.update({ ...session.data, tripwireNotice: false, tripwireNoticeShown: true });
-    return TRIPWIRE_NOTICE;
+    return message;
   }
   if (!session.data.at) return null;
   const event = await latestEvictionEvent();
-  if (event?.kind !== "tripwire" || Date.parse(event.at) <= session.data.at) return null;
+  if (!event || Date.parse(event.at) <= session.data.at || (event.kind !== "tripwire" && settings.lockdown_level !== 5)) return null;
   await session.update({ ...session.data, tripwireNoticeShown: true });
-  return TRIPWIRE_NOTICE;
+  return message;
 }
 
 export async function enforceChromebook(deviceId?: string) {
@@ -108,18 +114,24 @@ export async function enforceChromebook(deviceId?: string) {
       unlocked: false,
       admin: false,
       deviceId: deviceId ?? session.data.deviceId,
+      at: Date.parse(latestEvent.at),
       tripwireNotice: true,
       tripwireNoticeShown: false,
     });
     return false;
   }
 
-  await logActivity("tripwire", `TRIPWIRE: Non-Chromebook attempted access (${d.device}). Initiating lockdown and kicking all users.`, deviceId);
-  await evictUsers(true);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  if (deviceId && DEVICE_ID_PATTERN.test(deviceId)) {
-    const { error } = await supabaseAdmin.from("banned_devices").upsert({ device_id: deviceId, note: "Tripwire: Non-Chromebook attempt" });
-    if (error) throw new Error("Could not ban browser");
+  let confirmedTripwire = false;
+  if (deviceId && DEVICE_ID_PATTERN.test(deviceId) && d.user_agent) {
+    const { error } = await supabaseAdmin.rpc("tripwire_emergency", {
+      p_device_id: deviceId,
+      p_note: `Confirmed tripwire: non-Chromebook player access (${d.device})`,
+    });
+    if (error) throw new Error("Could not execute tripwire emergency response");
+    confirmedTripwire = true;
+  } else {
+    await logActivity("tripwire_observed", `Non-Chromebook request observed without a verifiable browser ID (${d.device}); no site-wide response was triggered.`, deviceId);
   }
   await session.update({
     ...session.data,
@@ -127,8 +139,8 @@ export async function enforceChromebook(deviceId?: string) {
     admin: false,
     deviceId: deviceId ?? session.data.deviceId,
     at: session.data.at ?? Date.now(),
-    tripwireNotice: true,
-    tripwireNoticeShown: false,
+    tripwireNotice: confirmedTripwire,
+    tripwireNoticeShown: !confirmedTripwire,
   });
   return false;
 }
@@ -151,11 +163,12 @@ export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof
     pendingAdminAuth: !locked,
     pendingAdminAt: locked ? undefined : session.data.pendingAdminAt,
     pendingTotpSecret: locked ? undefined : session.data.pendingTotpSecret,
+    pendingStaffId: locked ? undefined : session.data.pendingStaffId,
   });
   return locked;
 }
 
-export async function startAdminSession(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
+export async function startAdminSession(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string, role: GateSession["adminRole"] = "owner", staffId?: string) {
   const { randomUUID } = await import("node:crypto");
   const token = randomUUID();
   const hash = createHash("sha256").update(token).digest("hex");
@@ -163,13 +176,13 @@ export async function startAdminSession(session: Awaited<ReturnType<typeof getGa
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
   const { error } = await supabaseAdmin.from("admin_sessions").insert({
-    session_token_hash: hash, role: "owner", device_id: deviceId,
+    session_token_hash: hash, role: role ?? "owner", staff_id: staffId ?? null, device_id: deviceId,
     device: info.device, ip: info.ip, expires_at: expiresAt,
   });
   if (error) throw new Error("Could not create admin session");
   await session.update({
     ...session.data, unlocked: true, admin: true, adminSessionToken: token,
-    adminRole: "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
+    adminRole: role ?? "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, pendingStaffId: undefined,
     deviceId, at: Date.now(), friendId: undefined, token: undefined,
     tripwireNotice: false, tripwireNoticeShown: true,
   });
@@ -209,13 +222,18 @@ export async function isAdmin() {
   // Owner access is protected by the admin password and TOTP, not the player Chromebook gate.
   // Device bans and the Chromebook tripwire apply to player sessions only.
   const { data, error } = await supabaseAdmin.from("admin_sessions")
-    .select("id,role,expires_at,revoked_at,last_seen_at")
+    .select("id,role,staff_id,expires_at,revoked_at,last_seen_at")
     .eq("session_token_hash", hash).maybeSingle();
   if (error) throw new Error("Could not validate admin session");
   if (!data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) {
     if (data && !data.revoked_at) await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id);
     await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
     return false;
+  }
+  if (data.staff_id) {
+    const { data: staff, error: staffError } = await supabaseAdmin.from("admin_staff").select("disabled").eq("id", data.staff_id).maybeSingle();
+    if (staffError) throw new Error("Could not validate staff account");
+    if (!staff || staff.disabled) { await invalidateSession(); return false; }
   }
   if (s.data.adminRole !== data.role) await s.update({ ...s.data, adminRole: data.role as GateSession["adminRole"] });
   if (Date.now() - Date.parse(data.last_seen_at) > 60_000) {

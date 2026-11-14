@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   adminLogin,
+  checkAdminSession,
   getAdminSecurityOverview,
   revokeAdminSession,
   beginAdminTwoFactorSetup,
@@ -26,6 +27,10 @@ import {
   messageOnlineFriend,
   messageOnlineFriends,
   messageAllFriends,
+  listStaff,
+  createStaff,
+  updateStaff,
+  deleteStaff,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -53,8 +58,8 @@ export const Route = createFileRoute("/admin")({
     { name: "robots", content: "noindex" },
   ] }),
   loader: async () => {
-    const [codes, friends, activity, bans] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans()]);
-    return { ...codes, ...friends, ...activity, ...bans };
+    const [adminState, codes, friends, activity, bans] = await Promise.all([checkAdminSession(), listCodes(), listFriends(), getActivity(), listBans()]);
+    return { ...codes, ...friends, ...activity, ...bans, adminRole: adminState.role };
   },
   component: Admin,
 });
@@ -67,6 +72,7 @@ const tabs = [
   { id: "friends", label: "Friend accounts", icon: Users },
   { id: "access", label: "Access codes", icon: KeyRound },
   { id: "security", label: "Security Center", icon: Shield },
+  { id: "staff", label: "Staff", icon: Users },
   { id: "activity", label: "Activity audit", icon: Activity },
 ] as const;
 type AdminTab = typeof tabs[number]["id"];
@@ -80,7 +86,7 @@ type ActivityFilter = "all" | "failed" | "success" | "admin";
 type RosterFilter = "all" | "playing" | "hub" | "offline" | "banned";
 
 function Admin() {
-  const { admin, codes, friends, log, settings, bans } = Route.useLoaderData();
+  const { admin, codes, friends, log, settings, bans, adminRole } = Route.useLoaderData();
   const router = useRouter();
   const ban = useServerFn(setBan);
   const panic = useServerFn(globalPanic);
@@ -98,6 +104,15 @@ function Admin() {
   const removeCode = useServerFn(deleteCode);
   const lock = useServerFn(lockAdmin);
   const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
+  const loadStaff = useServerFn(listStaff);
+  const addStaff = useServerFn(createStaff);
+  const editStaff = useServerFn(updateStaff);
+  const removeStaff = useServerFn(deleteStaff);
+  const [staffRows, setStaffRows] = useState<Awaited<ReturnType<typeof listStaff>>["staff"]>([]);
+  const [staffUsername, setStaffUsername] = useState("");
+  const [staffPassword, setStaffPassword] = useState("");
+  const [staffRole, setStaffRole] = useState<"admin" | "moderator" | "support">("moderator");
+  const [newStaffCredentials, setNewStaffCredentials] = useState<{ username: string; secret: string; uri: string } | null>(null);
   const revokeSession = useServerFn(revokeAdminSession);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
@@ -127,6 +142,12 @@ function Admin() {
     if (!admin || !tabOk) return;
     loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
   }, [admin, tabOk, tab]);
+
+  const currentAdminRole = adminRole ?? adminSecurity?.sessions.find((item) => item.current)?.role;
+  useEffect(() => {
+    if (!admin || !tabOk || tab !== "staff" || currentAdminRole !== "owner") return;
+    loadStaff().then((result) => setStaffRows(result.staff)).catch(() => toast.error("Only the owner can manage staff accounts."));
+  }, [admin, tabOk, tab, currentAdminRole]);
 
   if (admin && tabOk === null) return null;
   if (!admin || !tabOk) return <AdminGate />;
@@ -254,17 +275,17 @@ function Admin() {
     <header className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Games hub · command center</p><h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Site controls</h1><p className="mt-2 text-sm text-muted-foreground">Live player operations and access management.</p></div>
-        <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${settings.lockdown ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}><span className={`h-2.5 w-2.5 rounded-full ${settings.lockdown ? "bg-destructive" : "animate-pulse bg-success"}`} />{settings.lockdown ? "Lockdown active" : "Live · Synced"}</div>
+        <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${settings.lockdown ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}><span className={`h-2.5 w-2.5 rounded-full ${settings.lockdown ? "bg-destructive" : "animate-pulse bg-success"}`} />{settings.lockdown ? `Level ${settings.lockdown_level} active` : settings.lockdown_level === 2 ? "Level 2 · Guarded" : "Level 1 · Normal"}</div>
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-5">
-        <Button variant={settings.lockdown ? "outline" : "secondary"} onClick={() => settings.lockdown
-          ? void perform("Lockdown disabled", () => save({ data: { lockdown: false } }))
-          : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdown: true } }); toast.success("Lockdown enabled"); await refresh(); })}>
+        {(currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant={settings.lockdown ? "outline" : "secondary"} onClick={() => settings.lockdown
+          ? void perform("Lockdown disabled", () => save({ data: { lockdownLevel: 1 } }))
+          : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdownLevel: 3 } }); toast.success("Lockdown enabled"); await refresh(); })}>
           <LockKeyhole className="mr-2 h-4 w-4" />{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}
-        </Button>
-        <Button variant="destructive" onClick={() => ask("Global Panic", "This immediately signs out every player and sends them to Geometry. This cannot be undone.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>
+        </Button>}
+        {currentAdminRole === "owner" && <Button variant="destructive" onClick={() => ask("Global Panic", "This immediately signs out every player and sends them to Geometry. This cannot be undone.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>
           <X className="mr-2 h-4 w-4" />Global Panic
-        </Button>
+        </Button>}
         <span className="ml-auto text-xs text-muted-foreground">Updated automatically every 5 seconds</span>
       </div>
       <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
@@ -278,19 +299,19 @@ function Admin() {
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-2">
           <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Online</span>
           <Button variant="outline" size="sm" disabled={onlineFriends.length === 0} onClick={() => openEditor({ kind: "broadcast-online", value: "" })}>Message online</Button>
-          <Button variant="outline" size="sm" onClick={() => ask("Kick all online players?", `This ends every active session for ${onlineFriends.length} online player${onlineFriends.length === 1 ? "" : "s"}.`, "Kick online", async () => { await kickOnlineFriends(); })}>Kick online</Button>
-          <Button variant="outline" size="sm" onClick={() => ask("Pause all online players?", "This freezes their access until you unpause them manually.", "Pause online", async () => { await pauseOnlineFriends(); })}>Pause online</Button>
+          {currentAdminRole === "owner" && <Button variant="outline" size="sm" onClick={() => ask("Kick all online players?", `This ends every active session for ${onlineFriends.length} online player${onlineFriends.length === 1 ? "" : "s"}.`, "Kick online", async () => { await kickOnlineFriends(); })}>Kick online</Button>}
+          {(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant="outline" size="sm" onClick={() => ask("Pause all online players?", "This freezes their access until you unpause them manually.", "Pause online", async () => { await pauseOnlineFriends(); })}>Pause online</Button>}
         </div>
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-2">
           <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">All</span>
           <Button variant="outline" size="sm" disabled={friends.length === 0} onClick={() => openEditor({ kind: "broadcast-all", value: "" })}>Message all</Button>
-          <Button variant="outline" size="sm" onClick={() => ask("Clear every stored session?", "This signs out everyone and removes their active sessions from the roster.", "Clear all sessions", async () => { await resetAllSessions(); })}>Clear all sessions</Button>
+          {currentAdminRole === "owner" && <Button variant="outline" size="sm" onClick={() => ask("Clear every stored session?", "This signs out everyone and removes their active sessions from the roster.", "Clear all sessions", async () => { await resetAllSessions(); })}>Clear all sessions</Button>}
         </div>
       </div>
     </header>
 
     <nav aria-label="Admin sections" role="tablist" className="sticky top-0 z-10 mt-5 flex gap-2 overflow-x-auto rounded-xl border border-border bg-background/95 p-2 backdrop-blur">
-      {tabs.map(({ id, label, icon: Icon }) => {
+      {tabs.filter((item) => (item.id !== "staff" || currentAdminRole === "owner") && (item.id !== "access" || currentAdminRole === "admin" || currentAdminRole === "owner")).map(({ id, label, icon: Icon }) => {
         const count = id === "players" ? friends.length : id === "friends" ? onlineFriends.length : id === "access" ? codes.length : id === "security" ? bans.length : id === "activity" ? failureCount : null;
         return <button key={id} id={`admin-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls="admin-panel" onClick={() => setTab(id)} onKeyDown={(event) => {
           if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
@@ -316,7 +337,7 @@ function Admin() {
           <StatCard label="Unused codes" value={codes.length} detail="One-time codes ready to use" accent="text-chart-1" />
         </section>
         <section className="mt-7"><div className="flex items-center justify-between gap-3"><div><h3 className="text-lg font-semibold">Live players</h3><p className="mt-1 text-sm text-muted-foreground">Current game and last-reported device. Browser IDs are not hardware identity.</p></div><span className="rounded-full bg-muted px-2.5 py-1 text-xs">{onlineFriends.length} active</span></div>
-          {onlineFriends.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No friends checked in during the last two minutes.</p> : <ul className="mt-4 grid gap-3 lg:grid-cols-2">{onlineFriends.map((f) => <li key={f.id} className="rounded-xl border border-border p-4 transition-colors hover:bg-muted/20"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-sm">{f.current_game ? <>Playing <strong>{f.current_game}</strong></> : "Browsing the games hub"}</p></div><span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success"><span className="h-1.5 w-1.5 rounded-full bg-success" />Online</span></div><div className="mt-4 flex items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2 text-xs"><span className="text-muted-foreground">Last seen</span><span className="font-medium">{when(f.last_seen)}</span></div><div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-border px-2 py-1">{f.device || "Unknown device"}</span>{f.device_id && <span className="rounded-full border border-border px-2 py-1 font-mono">{f.device_id}</span>}</div><div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></div></li>)}</ul>}
+          {onlineFriends.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No friends checked in during the last two minutes.</p> : <ul className="mt-4 grid gap-3 lg:grid-cols-2">{onlineFriends.map((f) => <li key={f.id} className="rounded-xl border border-border p-4 transition-colors hover:bg-muted/20"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-sm">{f.current_game ? <>Playing <strong>{f.current_game}</strong></> : "Browsing the games hub"}</p></div><span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success"><span className="h-1.5 w-1.5 rounded-full bg-success" />Online</span></div><div className="mt-4 flex items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2 text-xs"><span className="text-muted-foreground">Last seen</span><span className="font-medium">{when(f.last_seen)}</span></div><div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-border px-2 py-1">{f.device || "Unknown device"}</span>{f.device_id && <span className="rounded-full border border-border px-2 py-1 font-mono">{f.device_id}</span>}</div><div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button>{(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button>}</div></li>)}</ul>}
         </section>
       </>}
 
@@ -331,12 +352,12 @@ function Admin() {
             if (live && f.current_game) play[f.current_game] = (play[f.current_game] ?? 0) + live;
             const favorite = topGame(play);
             const state = online ? f.current_game ? "Playing" : "On hub" : "Offline";
-            return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-xs text-muted-foreground">{f.password ? "Account active" : "Passwordless"}</p></div></div></td><td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td><td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen ? <InfoChip>{f.screen}</InfoChip> : <InfoChip>Display hidden</InfoChip>}</div></td><td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite: {favorite.game}</p> : <p className="mt-1 text-xs text-muted-foreground">No play stats yet</p>}</td><td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-2"><Button variant="ghost" size="sm" onClick={() => void copyText(f.device_id ?? "", "Browser ID copied")}>Copy</Button><Button variant="outline" size="sm" onClick={() => void banDevice(f.device_id ?? "")}>Ban</Button></div></div> : <span className="text-muted-foreground">No browser ID</span>}</td><td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "No private note"}>{f.admin_note || "No private note"}</button></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2">{online ? <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></> : <span className="text-xs text-muted-foreground">Offline</span>}</div></td></tr>;
+            return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-xs text-muted-foreground">{f.password ? "Account active" : "Passwordless"}</p></div></div></td><td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td><td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen ? <InfoChip>{f.screen}</InfoChip> : <InfoChip>Display hidden</InfoChip>}</div></td><td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite: {favorite.game}</p> : <p className="mt-1 text-xs text-muted-foreground">No play stats yet</p>}</td><td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-2"><Button variant="ghost" size="sm" onClick={() => void copyText(f.device_id ?? "", "Browser ID copied")}>Copy</Button>{(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant="outline" size="sm" onClick={() => void banDevice(f.device_id ?? "")}>Ban</Button>}</div></div> : <span className="text-muted-foreground">No browser ID</span>}</td><td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "No private note"}>{f.admin_note || "No private note"}</button></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2">{online ? <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></> : <span className="text-xs text-muted-foreground">Offline</span>}</div></td></tr>;
           })}
         </tbody></table></div>
       </section>}
 
-      {tab === "friends" && <section><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><p className="max-w-2xl text-sm text-muted-foreground">Manage player accounts, active check-ins, and account expiry.</p><Button variant="secondary" onClick={() => openEditor({ kind: "add", name: "" })}>Add account</Button></div>
+      {tab === "friends" && <section><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><p className="max-w-2xl text-sm text-muted-foreground">Manage player accounts, active check-ins, and account expiry.</p>{(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant="secondary" onClick={() => openEditor({ kind: "add", name: "" })}>Add account</Button>}</div>
         {friends.length === 0 ? <EmptyState title="No friend accounts yet" detail="Create an account to invite a player."/> : <div className="grid gap-3 xl:grid-cols-2">{friends.map((f) => {
           const online = isFriendOnline(f, Date.now());
           const expired = !!f.expires_at && Date.parse(f.expires_at) <= Date.now();
@@ -346,7 +367,7 @@ function Admin() {
           return <article key={f.id} className="rounded-xl border border-border p-4 transition-colors hover:bg-muted/20"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div className="min-w-0"><h3 className="truncate font-semibold">{f.name || "(no name)"}</h3><p className="mt-1 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></div></div><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${online ? "bg-success/10 text-success" : f.paused || expired ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{status}</span></div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="rounded-lg bg-muted/30 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Login</p><p className="mt-1 truncate font-mono text-sm">{f.password}</p></div><div className="rounded-lg bg-muted/30 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Expires</p><p className="mt-1 text-sm">{f.expires_at ? when(f.expires_at) : "Never"}</p></div></div>
             <div className="mt-3 flex flex-wrap gap-2 text-xs"><InfoChip>{!f.expires_at ? "Permanent" : expired ? "Expired" : daysUntil === 0 ? "Expires today" : `Expires in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`}</InfoChip>{f.online ? <InfoChip>Session active</InfoChip> : <InfoChip>Offline</InfoChip>}</div>
-            <div className="mt-4 flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "rename", friend: f, value: f.name })}>Rename</Button><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "password", friend: f, value: f.password })}>Rotate password</Button><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "expiry", friend: f, value: f.expires_at ?? "" })}>Set expiry</Button><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "message", friend: f, value: "" })}>Send message</Button><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "note", friend: f, value: f.admin_note ?? "" })}>Note</Button><Button variant="destructive" size="sm" onClick={() => ask("Delete this friend account?", "This permanently removes the record and its saved password.", "Delete account", async () => { await removeFriend({ data: { id: f.id } }); toast.success("Friend removed"); await refresh(); })}>Delete</Button></div>
+            <div className="mt-4 flex flex-wrap gap-2">{(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "rename", friend: f, value: f.name })}>Rename</Button><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "password", friend: f, value: f.password })}>Rotate password</Button><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "expiry", friend: f, value: f.expires_at ?? "" })}>Set expiry</Button></>}<Button variant="outline" size="sm" onClick={() => openEditor({ kind: "message", friend: f, value: "" })}>Send message</Button>{(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant="outline" size="sm" onClick={() => openEditor({ kind: "note", friend: f, value: f.admin_note ?? "" })}>Note</Button>}{(currentAdminRole === "moderator" || currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant="destructive" size="sm" onClick={() => ask("Delete this friend account?", "This permanently removes the record and its saved password.", "Delete account", async () => { await removeFriend({ data: { id: f.id } }); toast.success("Friend removed"); await refresh(); })}>Delete</Button>}</div>
           </article>;
         })}</div>}
       </section>}
@@ -378,11 +399,34 @@ function Admin() {
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Recent security events</h3><p className="mt-1 text-sm text-muted-foreground">Latest authentication, blocking, tripwire, and admin events.</p></div><Button variant="outline" size="sm" onClick={() => setTab("activity")}>Open full audit</Button></div>
           {recentSecurityEvents.length === 0 ? <EmptyState title="No recent security events" detail="New security events will appear here as they happen." /> : <ol className="mt-3 divide-y divide-border rounded-xl border border-border bg-background">{recentSecurityEvents.map((entry) => <li key={`${entry.id}-security`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind) ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{entry.kind}</span></li>)}</ol>}
         </div>
-        <div className="grid gap-3 lg:grid-cols-2"><div className={`rounded-xl border p-5 ${settings.lockdown ? "border-destructive/40 bg-destructive/5" : "border-border bg-background"}`}><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><LockKeyhole className="h-5 w-5" /></span><div><h3 className="font-semibold">Lockdown</h3><p className="text-sm text-muted-foreground">Block access to the games hub and redirect players back to Geometry.</p></div></div><Button variant={settings.lockdown ? "outline" : "secondary"} className="mt-4" onClick={() => settings.lockdown
-          ? void perform("Lockdown disabled", () => save({ data: { lockdown: false } }))
-          : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdown: true } }); toast.success("Lockdown enabled"); await refresh(); })}>{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}</Button></div><div className="rounded-xl border border-border p-5"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Evict all active player sessions.</p></div></div><Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button></div></div>
+        {(currentAdminRole === "admin" || currentAdminRole === "owner") && <div className="rounded-xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h3 className="font-semibold">Site lockdown level</h3><p className="mt-1 text-sm text-muted-foreground">Changes apply on the next player check (normally within a few seconds). Level 5 immediately ends sessions and sends the emergency notice.</p></div>
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${settings.lockdown_level >= 3 ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}>Level {settings.lockdown_level} · {settings.lockdown_level >= 3 ? "Restricted" : "Operational"}</span>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {[
+              { level: 1, name: "Normal", detail: "All player access is available." },
+              { level: 2, name: "Guarded", detail: "Block new player sign-ins; current sessions continue." },
+              { level: 3, name: "Restricted", detail: "Block player access to the games hub." },
+              { level: 4, name: "Lockdown", detail: "Block access and terminate all active player sessions." },
+              { level: 5, name: "Emergency", detail: "Level 4 plus an emergency announcement. Owner only." },
+            ].map((item) => <button key={item.level} type="button" disabled={settings.lockdown_level === item.level || saving} onClick={() => {
+              const apply = async () => { await save({ data: { lockdownLevel: item.level } }); toast.success(`Lockdown set to Level ${item.level}`); await refresh(); };
+              if (item.level >= 4) ask(`Enable Level ${item.level}?`, item.detail, `Set Level ${item.level}`, apply);
+              else void perform(`Lockdown set to Level ${item.level}`, apply);
+            }} className={`rounded-lg border p-3 text-left transition-colors ${settings.lockdown_level === item.level ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted/40"}`}>
+              <div className="flex items-center justify-between gap-2"><span className="font-semibold">Level {item.level} · {item.name}</span>{settings.lockdown_level === item.level && <Check className="h-4 w-4 text-primary" />}</div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+            </button>)}
+          </div>
+        </div>}
+        {currentAdminRole === "owner" && <div className="mt-5 rounded-xl border border-border bg-background p-5">
+          <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Immediately terminate all active player sessions without changing the lockdown level.</p></div></div>
+          <Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button>
+        </div>}
         <div className="mt-8"><div><h3 className="text-lg font-semibold">Banned browser IDs</h3><p className="mt-1 text-sm text-muted-foreground">Browser IDs can be reset and are not hardware identity.</p></div>
-          {bans.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No browser IDs are currently banned.</p> : <ul className="mt-4 divide-y divide-border rounded-xl border border-border">{bans.map((item) => <li key={item.device_id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><code className="break-all font-mono text-xs">{item.device_id}</code><p className="mt-1 text-xs text-muted-foreground">{item.note || "No note"} · added {when(item.created_at)}</p></div><Button variant="outline" size="sm" onClick={() => void perform("Browser ID unbanned", () => ban({ data: { deviceId: item.device_id, banned: false } }))}>Unban</Button></li>)}</ul>}
+          {bans.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No browser IDs are currently banned.</p> : <ul className="mt-4 divide-y divide-border rounded-xl border border-border">{bans.map((item) => <li key={item.device_id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><code className="break-all font-mono text-xs">{item.device_id}</code><p className="mt-1 text-xs text-muted-foreground">{item.note || "No note"} · added {when(item.created_at)}</p></div>{currentAdminRole !== "support" && <Button variant="outline" size="sm" onClick={() => void perform("Browser ID unbanned", () => ban({ data: { deviceId: item.device_id, banned: false } }))}>Unban</Button>}</li>)}</ul>}
         </div>
         <div className="mt-8 space-y-4">
           <div><h3 className="text-lg font-semibold">Administrator security</h3><p className="mt-1 text-sm text-muted-foreground">Two-factor authentication, active admin sessions, and a protected audit trail.</p></div>
@@ -402,7 +446,28 @@ function Admin() {
         </div>
       </section>}
 
-      {tab === "activity" && <section><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm text-muted-foreground">Recent security and sign-in events. Attempted inputs are kept for audit only.</p></div><Button variant="outline" size="sm" onClick={() => void perform("Activity log cleared", () => clearLog({}))}>Clear log</Button></div>
+      {tab === "staff" && currentAdminRole === "owner" && <section>
+        <div className="max-w-2xl"><h3 className="font-semibold">Create a staff account</h3><p className="mt-1 text-sm text-muted-foreground">Each staff member gets a separate username, password and authenticator secret. The authenticator secret is shown only once when the account is created.</p></div>
+        <form className="mt-4 grid gap-3 rounded-xl border border-border bg-background p-4 sm:grid-cols-2" onSubmit={async (event) => {
+          event.preventDefault();
+          try {
+            const result = await addStaff({ data: { username: staffUsername, password: staffPassword, role: staffRole } });
+            setNewStaffCredentials({ username: result.staff.username, secret: result.authenticatorSecret, uri: result.authenticatorUri });
+            setStaffUsername(""); setStaffPassword("");
+            setStaffRows((rows) => [...rows, result.staff]);
+            toast.success("Staff account created. Save its authenticator setup key now.");
+          } catch (error) { toast.error(error instanceof Error ? error.message : "Could not create staff account."); }
+        }}>
+          <label className="text-sm font-medium">Username<Input value={staffUsername} onChange={(event) => setStaffUsername(event.target.value)} minLength={3} maxLength={32} required className="mt-1" /></label>
+          <label className="text-sm font-medium">Temporary password<Input type="password" value={staffPassword} onChange={(event) => setStaffPassword(event.target.value)} minLength={12} maxLength={200} required className="mt-1" /></label>
+          <label className="text-sm font-medium">Role<select value={staffRole} onChange={(event) => setStaffRole(event.target.value as typeof staffRole)} className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3"><option value="support">Support</option><option value="moderator">Moderator</option><option value="admin">Administrator</option></select></label>
+          <div className="flex items-end"><Button type="submit">Create staff account</Button></div>
+        </form>
+        {newStaffCredentials && <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4"><h4 className="font-semibold">Authenticator setup for {newStaffCredentials.username}</h4><p className="mt-1 text-sm text-muted-foreground">Give this setup key to the staff member through a secure channel and have them add it to their authenticator app. It will not be shown again after leaving this screen.</p><code className="mt-3 block break-all rounded bg-background p-3 text-sm">{newStaffCredentials.secret}</code><a href={newStaffCredentials.uri} className="mt-2 inline-block text-sm text-primary underline">Open authenticator app</a><Button className="mt-3" size="sm" variant="outline" onClick={() => setNewStaffCredentials(null)}>I saved the setup key</Button></div>}
+        <div className="mt-6"><h3 className="font-semibold">Staff accounts</h3>{staffRows.length === 0 ? <p className="mt-3 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No staff accounts have been created.</p> : <ul className="mt-3 divide-y divide-border rounded-xl border border-border">{staffRows.map((staff) => <li key={staff.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold">{staff.username}</p><p className="mt-1 text-xs text-muted-foreground">{staff.role} · {staff.disabled ? "Disabled" : "Active"} · Created {when(staff.created_at)}</p></div><div className="flex flex-wrap gap-2"><select aria-label={`Role for ${staff.username}`} value={staff.role} onChange={async (event) => { const role = event.target.value as "admin" | "moderator" | "support"; try { const result = await editStaff({ data: { id: staff.id, role } }); setStaffRows((rows) => rows.map((row) => row.id === staff.id ? { ...row, role: result.staff.role } : row)); } catch { toast.error("Could not update staff role."); } }} className="h-9 rounded-md border border-border bg-background px-2 text-xs"><option value="support">Support</option><option value="moderator">Moderator</option><option value="admin">Administrator</option></select><Button size="sm" variant="outline" onClick={async () => { try { const disabled = !staff.disabled; await editStaff({ data: { id: staff.id, disabled } }); setStaffRows((rows) => rows.map((row) => row.id === staff.id ? { ...row, disabled } : row)); } catch { toast.error("Could not update staff account."); } }}>{staff.disabled ? "Enable" : "Disable"}</Button><Button size="sm" variant="destructive" onClick={() => ask("Delete staff account?", `Permanently remove ${staff.username} and revoke their sessions?`, "Delete account", async () => { await removeStaff({ data: { id: staff.id } }); setStaffRows((rows) => rows.filter((row) => row.id !== staff.id)); toast.success("Staff account deleted"); })}>Delete</Button></div></li>)}</ul>}</div>
+      </section>}
+
+      {tab === "activity" && <section><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm text-muted-foreground">Recent security and sign-in events. Attempted inputs are kept for audit only.</p></div>{currentAdminRole === "owner" && <Button variant="outline" size="sm" onClick={() => void perform("Activity log cleared", () => clearLog({}))}>Clear log</Button>}</div>
         <div className="mt-4 flex flex-wrap gap-1.5">{(["all", "failed", "success", "admin"] as const).map((filter) => <FilterPill key={filter} active={activityFilter === filter} onClick={() => setActivityFilter(filter)}>{filter === "all" ? "All" : filter === "failed" ? "Failed" : filter === "success" ? "Success" : "Admin"}</FilterPill>)}</div>
         {filteredLog.length === 0 ? <EmptyState title="No activity in this view" detail="New activity will appear here as it happens."/> : <ol className="mt-4 divide-y divide-border rounded-xl border border-border bg-background">{filteredLog.map((entry) => <li key={`${entry.id}-${entry.at}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p>{entry.attempted_input && <p className="mt-2 text-xs text-muted-foreground">Submitted input redacted for security.</p>}</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${entry.kind.includes("wrong") || entry.kind === "blocked" || entry.kind === "tripwire" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{entry.kind}</span></li>)}</ol>}
       </section>}
@@ -465,8 +530,10 @@ function AdminGate() {
     event.preventDefault();
     setBusy(true);
     try {
-      const password = new FormData(event.currentTarget).get("password") as string;
-      const result = await login({ data: { password, deviceId } });
+      const form = new FormData(event.currentTarget);
+      const password = form.get("password") as string;
+      const username = String(form.get("username") ?? "").trim();
+      const result = await login({ data: { password, deviceId, ...(username ? { username } : {}) } });
       if ("requiresSetup" in result && result.requiresSetup) {
         const setup = await beginSetup();
         setSecret(setup.secret);
@@ -508,7 +575,8 @@ function AdminGate() {
     <hr className="my-4 border-border" />
     <p className="text-center text-muted-foreground">This page is reserved for the site owner.</p>
     {stage === "password" && <form onSubmit={onPassword} className="mx-auto mt-6 max-w-sm space-y-3">
-      <Input name="password" type="password" placeholder="Admin password" autoComplete="off" required />
+      <Input name="username" placeholder="Staff username (leave blank for owner)" autoComplete="username" />
+      <Input name="password" type="password" placeholder="Password" autoComplete="current-password" required />
       <Button type="submit" className="w-full" disabled={!deviceId || busy}>{busy ? "Checking…" : "Continue"}</Button>
     </form>}
     {stage === "setup" && <div className="mx-auto mt-6 max-w-md space-y-4">

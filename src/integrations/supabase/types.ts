@@ -200,19 +200,31 @@ export type Database = {
           id: number
           kick_all_at: string | null
           lockdown: boolean
+          lockdown_level: number
+          broadcast_message: string | null
         }
         Insert: {
           hidden_games?: string[]
           id?: number
           kick_all_at?: string | null
           lockdown?: boolean
+          lockdown_level?: number
+          broadcast_message?: string | null
         }
         Update: {
           hidden_games?: string[]
           id?: number
           kick_all_at?: string | null
           lockdown?: boolean
+          lockdown_level?: number
+          broadcast_message?: string | null
         }
+        Relationships: []
+      }
+      admin_staff: {
+        Row: { id: string; username: string; password_hash: string; role: string; totp_secret_ciphertext: string | null; totp_enabled: boolean; recovery_code_hashes: string[]; disabled: boolean; created_at: string; updated_at: string }
+        Insert: { id?: string; username: string; password_hash: string; role: string; totp_secret_ciphertext?: string | null; totp_enabled?: boolean; recovery_code_hashes?: string[]; disabled?: boolean; created_at?: string; updated_at?: string }
+        Update: { id?: string; username?: string; password_hash?: string; role?: string; totp_secret_ciphertext?: string | null; totp_enabled?: boolean; recovery_code_hashes?: string[]; disabled?: boolean; created_at?: string; updated_at?: string }
         Relationships: []
       }
       admin_security: {
@@ -222,9 +234,9 @@ export type Database = {
         Relationships: []
       }
       admin_sessions: {
-        Row: { id: string; session_token_hash: string; role: string; device_id: string | null; device: string | null; ip: string | null; created_at: string; last_seen_at: string; expires_at: string; revoked_at: string | null }
-        Insert: { id?: string; session_token_hash: string; role?: string; device_id?: string | null; device?: string | null; ip?: string | null; created_at?: string; last_seen_at?: string; expires_at: string; revoked_at?: string | null }
-        Update: { id?: string; session_token_hash?: string; role?: string; device_id?: string | null; device?: string | null; ip?: string | null; created_at?: string; last_seen_at?: string; expires_at?: string; revoked_at?: string | null }
+        Row: { id: string; session_token_hash: string; role: string; device_id: string | null; device: string | null; ip: string | null; created_at: string; last_seen_at: string; expires_at: string; revoked_at: string | null; staff_id: string | null }
+        Insert: { id?: string; session_token_hash: string; role?: string; device_id?: string | null; device?: string | null; ip?: string | null; created_at?: string; last_seen_at?: string; expires_at: string; revoked_at?: string | null; staff_id?: string | null }
+        Update: { id?: string; session_token_hash?: string; role?: string; device_id?: string | null; device?: string | null; ip?: string | null; created_at?: string; last_seen_at?: string; expires_at?: string; revoked_at?: string | null; staff_id?: string | null }
         Relationships: []
       }
       admin_audit_log: {
@@ -241,6 +253,7 @@ export type Database = {
       evict_gate_users: { Args: { p_lockdown?: boolean }; Returns: undefined }
       record_device_failure: { Args: { p_device_id: string }; Returns: boolean }
       consume_admin_recovery_code: { Args: { p_code_hash: string }; Returns: boolean }
+      tripwire_emergency: { Args: { p_device_id: string; p_note?: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never

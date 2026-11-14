@@ -5,6 +5,20 @@ const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const PERIOD_SECONDS = 30;
 const DIGITS = 6;
 
+export function hashStaffPassword(password: string) {
+  const salt = randomBytes(16).toString("base64url");
+  const hash = scryptSync(password, salt, 64).toString("base64url");
+  return "scrypt$" + salt + "$" + hash;
+}
+
+export function verifyStaffPassword(password: string, encoded: string) {
+  const [algorithm, salt, expected] = encoded.split("$");
+  if (algorithm !== "scrypt" || !salt || !expected) return false;
+  const actual = scryptSync(password, salt, 64);
+  const target = Buffer.from(expected, "base64url");
+  return actual.length === target.length && timingSafeEqual(actual, target);
+}
+
 export function generateTotpSecret() {
   return encodeBase32(randomBytes(20));
 }
