@@ -22,7 +22,7 @@ let last=0;addEventListener('keydown',e=>{if(e.key==='Escape'){const now=Date.no
 let busy=false;const check=async()=>{if(busy)return;busy=true;try{
 if(store.getItem('gate-tab')!=='1'||Date.now()-Number(store.getItem('last-active'))>${IDLE_LIMIT_MS}){go();return}
 const r=await fetch('/hub?session-check=1',{cache:'no-store',credentials:'same-origin'});if(!r.ok){go();return}const s=await r.json();
-if(s.broadcast){go(s.broadcast);return}if(!s.unlocked){go();return}
+if(s.broadcast){go(s.broadcast);return}if(!s.unlocked){if(s.emergencyLevel>=3&&s.emergencyNotice)store.setItem('gate-emergency-evacuation',s.emergencyNotice);go();return}
 if(route==='/hub'&&Array.isArray(s.hiddenGames)){const hidden=new Set(s.hiddenGames);T.document.querySelectorAll('.game-card').forEach(card=>{const link=card.querySelector('a[href^="/play/"]');if(!link)return;const slug=new URL(link.href).pathname.split('/')[2];card.hidden=hidden.has(slug)})}
 if(route==='/hub'&&s.emergencyNotice){if(store.getItem('gate-emergency-notice')!==s.emergencyNotice){store.setItem('gate-emergency-notice',s.emergencyNotice);notify(s.emergencyNotice)}}else if(route==='/hub'&&!s.emergencyNotice){store.removeItem('gate-emergency-notice')}
 if(s.message&&(window===T||window===T.frames[0])){notify(s.message);await fetch('/hub?session-check=1&ack=1',{cache:'no-store',credentials:'same-origin'})}
