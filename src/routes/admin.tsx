@@ -31,6 +31,8 @@ import {
   getPlayerManagementData,
   moderatePlayer,
   reviewPlayerAppeal,
+  setEmergencyProtocol,
+  getPlatformAnalytics,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -44,7 +46,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, Users, X } from "lucide-react";
+import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, SlidersHorizontal, Users, X } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
@@ -74,6 +76,7 @@ const tabs = [
   { id: "friends", label: "Friend accounts", icon: Users },
   { id: "moderation", label: "Moderation & appeals", icon: Gavel },
   { id: "messages", label: "Message history", icon: MessageSquare },
+  { id: "platform", label: "Platform controls", icon: SlidersHorizontal },
   { id: "access", label: "Access codes", icon: KeyRound },
   { id: "security", label: "Security Center", icon: Shield },
   { id: "activity", label: "Activity audit", icon: Activity },
@@ -111,6 +114,8 @@ function Admin() {
   const revokeSession = useServerFn(revokeAdminSession);
   const moderate = useServerFn(moderatePlayer);
   const reviewAppeal = useServerFn(reviewPlayerAppeal);
+  const setEmergency = useServerFn(setEmergencyProtocol);
+  const loadAnalytics = useServerFn(getPlatformAnalytics);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
@@ -127,6 +132,9 @@ function Admin() {
   const [visiblePasswords, setVisiblePasswords] = useState<string[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<Friend | null>(null);
   const [moderationDraft, setModerationDraft] = useState<{ friend: Friend; duration: "1h" | "24h" | "7d" | "permanent"; reason: string } | null>(null);
+  const [emergencyLevel, setEmergencyLevel] = useState(settings.emergency_level);
+  const [emergencyNotice, setEmergencyNotice] = useState(settings.emergency_notice);
+  const [platformAnalytics, setPlatformAnalytics] = useState<Awaited<ReturnType<typeof getPlatformAnalytics>> | null>(null);
 
   useEffect(() => {
     access({ data: { deviceId: getBrowserDeviceId() } }).then((result) => {
@@ -147,6 +155,14 @@ function Admin() {
   useEffect(() => {
     if (!admin || !tabOk) return;
     loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
+  }, [admin, tabOk, tab]);
+  useEffect(() => {
+    setEmergencyLevel(settings.emergency_level);
+    setEmergencyNotice(settings.emergency_notice);
+  }, [settings.emergency_level, settings.emergency_notice]);
+  useEffect(() => {
+    if (!admin || !tabOk || tab !== "platform") return;
+    loadAnalytics().then(setPlatformAnalytics).catch(() => setPlatformAnalytics(null));
   }, [admin, tabOk, tab]);
 
   if (!accessOk || (admin && tabOk === null)) return null;
