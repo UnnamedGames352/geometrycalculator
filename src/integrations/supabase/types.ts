@@ -215,6 +215,24 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_security: {
+        Row: { id: number; totp_secret_ciphertext: string | null; totp_enabled: boolean; recovery_code_hashes: string[]; updated_at: string }
+        Insert: { id: number; totp_secret_ciphertext?: string | null; totp_enabled?: boolean; recovery_code_hashes?: string[]; updated_at?: string }
+        Update: { id?: number; totp_secret_ciphertext?: string | null; totp_enabled?: boolean; recovery_code_hashes?: string[]; updated_at?: string }
+        Relationships: []
+      }
+      admin_sessions: {
+        Row: { id: string; session_token_hash: string; role: string; device_id: string | null; device: string | null; ip: string | null; created_at: string; last_seen_at: string; expires_at: string; revoked_at: string | null }
+        Insert: { id?: string; session_token_hash: string; role?: string; device_id?: string | null; device?: string | null; ip?: string | null; created_at?: string; last_seen_at?: string; expires_at: string; revoked_at?: string | null }
+        Update: { id?: string; session_token_hash?: string; role?: string; device_id?: string | null; device?: string | null; ip?: string | null; created_at?: string; last_seen_at?: string; expires_at?: string; revoked_at?: string | null }
+        Relationships: []
+      }
+      admin_audit_log: {
+        Row: { id: number; actor_session_id: string | null; actor_role: string; action: string; detail: string; device: string | null; ip: string | null; created_at: string }
+        Insert: { id?: number; actor_session_id?: string | null; actor_role?: string; action: string; detail?: string; device?: string | null; ip?: string | null; created_at?: string }
+        Update: { id?: number; actor_session_id?: string | null; actor_role?: string; action?: string; detail?: string; device?: string | null; ip?: string | null; created_at?: string }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -222,6 +240,7 @@ export type Database = {
     Functions: {
       evict_gate_users: { Args: { p_lockdown?: boolean }; Returns: undefined }
       record_device_failure: { Args: { p_device_id: string }; Returns: boolean }
+      consume_admin_recovery_code: { Args: { p_code_hash: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never

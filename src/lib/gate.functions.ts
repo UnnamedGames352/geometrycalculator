@@ -55,7 +55,7 @@ export const listFriends = createServerFn({ method: "GET" }).handler(async () =>
 export const createFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { name: string }) => ({ name: String(d?.name ?? "").trim().slice(0, 40) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("createFriend");
     const { randomBytes } = await import("node:crypto");
     const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const password = Array.from(randomBytes(10), (b) => abc[b % abc.length]).join("");
@@ -67,7 +67,7 @@ export const createFriend = createServerFn({ method: "POST" })
 export const deleteFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("deleteFriend");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("friend_passwords").delete().eq("id", data.id);
     return { ok: true };
@@ -76,7 +76,7 @@ export const deleteFriend = createServerFn({ method: "POST" })
 export const kickFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("kickFriend");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("friend_passwords").update({ active_session: null }).eq("id", data.id);
     return { ok: true };
@@ -108,25 +108,159 @@ export const adminLogin = createServerFn({ method: "POST" })
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted admin login",data.deviceId,data.password); return { ok: false as const }; }
     const expected = process.env["SITE_PASSWORD"];
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
-    const s = await getGateSession();
-    await s.update({ unlocked: true, admin: true, deviceId: data.deviceId, at: Date.now(), friendId: undefined, token: undefined });
-    await logActivity("admin_login", "Admin signed in",data.deviceId);
+    const session = await getGateSession();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (session.data.adminSessionToken) {
+      const { createHash } = await import("node:crypto");
+      const oldHash = createHash("sha256").update(session.data.adminSessionToken).digest("hex");
+      await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", oldHash).is("revoked_at", null);
+    }
+    const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
+    if (error) throw new Error("Could not check administrator security settings");
+    await session.update({ ...session.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAt: Date.now(), pendingAdminAttempts: 0, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
+    await logActivity("admin_password_verified", "Admin password verified; second factor required", data.deviceId);
+    return security?.totp_enabled ? { ok: false as const, requiresTwoFactor: true as const } : { ok: false as const, requiresSetup: true as const };
+  });
+
+export const beginAdminTwoFactorSetup = createServerFn({ method: "POST" }).handler(async () => {
+  const { getGateSession } = await import("./gate.server");
+  const session = await getGateSession();
+  if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000) throw new Error("Admin verification expired. Sign in again.");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: currentSecurity, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
+  if (error) throw new Error("Could not check authenticator status");
+  if (currentSecurity?.totp_enabled) throw new Error("Two-factor authentication is already enabled. Use an authenticator code to sign in.");
+  const { generateTotpSecret, buildTotpUri } = await import("./admin-security");
+  const secret = generateTotpSecret();
+  await session.update({ ...session.data, pendingTotpSecret: secret });
+  return { secret, uri: buildTotpUri(secret) };
+});
+
+export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
+  .inputValidator((d: { code: string }) => z.object({ code: z.string().regex(/^\d{6}$/) }).parse(d))
+  .handler(async ({ data }) => {
+    const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
+    const session = await getGateSession();
+    const secret = session.data.pendingTotpSecret;
+    if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000 || !secret) throw new Error("Admin verification expired. Sign in again.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: existingSecurity, error: existingError } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
+    if (existingError) throw new Error("Could not check authenticator status");
+    if (existingSecurity?.totp_enabled) throw new Error("Two-factor authentication is already enabled.");
+    const { verifyTotp, encryptTotpSecret, generateRecoveryCodes, hashRecoveryCode } = await import("./admin-security");
+    if (!verifyTotp(secret, data.code)) {
+      const { failedAdminSecondFactor } = await import("./gate.server");
+      await failedAdminSecondFactor(session, session.data.deviceId);
+      return { ok: false as const, error: "That authenticator code is not valid." };
+    }
+    const sessionSecret = process.env["SESSION_SECRET"];
+    if (!sessionSecret) throw new Error("Session encryption is unavailable.");
+    const recoveryCodes = generateRecoveryCodes();
+    const { error } = await supabaseAdmin.from("admin_security").upsert({
+      id: 1, totp_secret_ciphertext: encryptTotpSecret(secret, sessionSecret),
+      totp_enabled: true, recovery_code_hashes: recoveryCodes.map(hashRecoveryCode), updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error("Could not save authenticator settings");
+    await startAdminSession(session, session.data.deviceId);
+    await recordAdminAudit("two_factor_enabled", "Authenticator-based two-factor authentication enabled");
+    return { ok: true as const, recoveryCodes };
+  });
+
+export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
+  .inputValidator((d: { code: string }) => z.object({ code: z.string().min(6).max(32) }).parse(d))
+  .handler(async ({ data }) => {
+    const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
+    const session = await getGateSession();
+    if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000) return { ok: false as const };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled,totp_secret_ciphertext").eq("id", 1).maybeSingle();
+    if (error || !security?.totp_enabled || !security.totp_secret_ciphertext) return { ok: false as const };
+    const sessionSecret = process.env["SESSION_SECRET"];
+    if (!sessionSecret) throw new Error("Session encryption is unavailable.");
+    const { decryptTotpSecret, verifyTotp, hashRecoveryCode } = await import("./admin-security");
+    let accepted = false;
+    try { accepted = verifyTotp(decryptTotpSecret(security.totp_secret_ciphertext, sessionSecret), data.code); } catch { accepted = false; }
+    if (!accepted) {
+      const { data: consumed, error: consumeError } = await supabaseAdmin.rpc("consume_admin_recovery_code", { p_code_hash: hashRecoveryCode(data.code) });
+      if (consumeError) throw new Error("Could not verify recovery code");
+      accepted = !!consumed;
+    }
+    if (!accepted) {
+      const { failedAdminSecondFactor } = await import("./gate.server");
+      await failedAdminSecondFactor(session, session.data.deviceId);
+      return { ok: false as const };
+    }
+    await startAdminSession(session, session.data.deviceId);
+    await recordAdminAudit("admin_two_factor_login", "Administrator completed two-factor authentication");
+    return { ok: true as const };
+  });
+
+export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getGateSession } = await import("./gate.server");
+  const session = await getGateSession();
+  const { createHash } = await import("node:crypto");
+  const hash = session.data.adminSessionToken ? createHash("sha256").update(session.data.adminSessionToken).digest("hex") : "";
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }] = await Promise.all([
+    supabaseAdmin.from("admin_security").select("totp_enabled,recovery_code_hashes").eq("id", 1).maybeSingle(),
+    supabaseAdmin.from("admin_sessions").select("id,role,device,ip,created_at,last_seen_at,expires_at,revoked_at,session_token_hash").is("revoked_at", null).gt("expires_at", new Date().toISOString()).order("last_seen_at", { ascending: false }).limit(30),
+    supabaseAdmin.from("admin_audit_log").select("id,actor_role,action,detail,device,ip,created_at").order("created_at", { ascending: false }).limit(40),
+  ]);
+  if (settingsError || sessionsError || auditError) throw new Error("Could not load admin security overview");
+  return {
+    twoFactorEnabled: !!settings?.totp_enabled,
+    remainingRecoveryCodes: settings?.recovery_code_hashes?.length ?? 0,
+    sessions: (sessions ?? []).map(({ session_token_hash, ...row }) => ({ ...row, current: session_token_hash === hash })),
+    audit: audit ?? [],
+  };
+});
+
+export const revokeAdminSession = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("revokeAdminSession", "owner");
+    const { getGateSession, recordAdminAudit } = await import("./gate.server");
+    const session = await getGateSession();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id).is("revoked_at", null).select("id").maybeSingle();
+    if (error) throw new Error("Could not revoke admin session");
+    if (!row) return { ok: false as const };
+    await recordAdminAudit("admin_session_revoked", `Administrator session ${data.id} revoked`);
+    const { createHash } = await import("node:crypto");
+    if (session.data.adminSessionToken) {
+      const hash = createHash("sha256").update(session.data.adminSessionToken).digest("hex");
+      const { data: current } = await supabaseAdmin.from("admin_sessions").select("id").eq("id", data.id).eq("session_token_hash", hash).maybeSingle();
+      if (current) await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
+    }
     return { ok: true as const };
   });
 
 // Locks the admin page again (used when a new tab opens without having entered the passcode).
 export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => {
-  const { getGateSession } = await import("./gate.server");
+  const { getGateSession, recordAdminAudit } = await import("./gate.server");
   const s = await getGateSession();
-  await s.update({ ...s.data, admin: false });
+  if (s.data.adminSessionToken) {
+    const { createHash } = await import("node:crypto");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const hash = createHash("sha256").update(s.data.adminSessionToken).digest("hex");
+    await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", hash).is("revoked_at", null);
+    await recordAdminAudit("admin_logout", "Administrator signed out");
+  }
+  await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, friendId: undefined, token: undefined });
   return { ok: true };
 });
 
 
-async function requireAdmin() {
-  const { getGateSession } = await import("./gate.server");
-  const s = await getGateSession();
-  if (!(await (await import("./gate.server")).isAdmin())) throw new Error("Not Found");
+const ROLE_LEVEL: Record<string, number> = { support: 1, moderator: 2, admin: 3, owner: 4 };
+
+async function requireAdmin(action = "admin_action", minimumRole: "support" | "moderator" | "admin" | "owner" = "admin") {
+  const { getGateSession, isAdmin, recordAdminAudit } = await import("./gate.server");
+  if (!(await isAdmin())) throw new Error("Not Found");
+  const session = await getGateSession();
+  const role = session.data.adminRole ?? "owner";
+  if ((ROLE_LEVEL[role] ?? 0) < (ROLE_LEVEL[minimumRole] ?? 0)) throw new Error("Not Found");
+  await recordAdminAudit(`${action}_started`, "Administrator action authorized");
 }
 
 export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
@@ -138,7 +272,7 @@ export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
 });
 
 export const createCode = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("createCode");
   const { randomBytes } = await import("node:crypto");
   const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const code = Array.from(randomBytes(8), (b) => abc[b % abc.length]).join("");
@@ -150,7 +284,7 @@ export const createCode = createServerFn({ method: "POST" }).handler(async () =>
 export const deleteCode = createServerFn({ method: "POST" })
   .inputValidator((d: { code: string }) => ({ code: String(d?.code ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("deleteCode");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("access_codes").delete().eq("code", data.code);
     return { ok: true };
@@ -182,7 +316,7 @@ export const updateFriend = createServerFn({ method: "POST" })
     expires_at: d?.expires_at === undefined ? undefined : d.expires_at ? new Date(d.expires_at).toISOString() : null,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("updateFriend");
     const patch: { name?: string; password?: string; active_session?: null; paused?: boolean; expires_at?: string | null; admin_note?: string } = {};
     if (data.admin_note !== undefined) patch.admin_note = data.admin_note;
     if (data.name !== undefined) patch.name = data.name;
@@ -203,12 +337,12 @@ export const getActivity = createServerFn({ method: "GET" }).handler(async () =>
   const { getGateSession, getSettings } = await import("./gate.server");
   if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null } };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin.from("activity_log").select("at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
+  const { data } = await supabaseAdmin.from("activity_log").select("id, at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
   return { log: data ?? [], settings: await getSettings() };
 });
 
 export const clearActivity = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("clearActivity");
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   await supabaseAdmin.from("activity_log").delete().not("id", "is", null);
   return { ok: true };
@@ -221,7 +355,7 @@ export const saveSettings = createServerFn({ method: "POST" })
     kickAll: !!d?.kickAll,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("saveSettings");
     const { getSettings } = await import("./gate.server");
     const cur = await getSettings();
     const next = {
@@ -242,7 +376,7 @@ export const saveSettings = createServerFn({ method: "POST" })
 export const messageFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? "").trim(), message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageFriend");
     if (!data.id) throw new Error("Friend id is required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
@@ -256,7 +390,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
     message: String(d?.message ?? "").trim().slice(0, 300),
   }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageOnlineFriend");
     if (!data.id || !data.message) throw new Error("A player and message are required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -273,7 +407,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
 export const messageOnlineFriends = createServerFn({ method: "POST" })
   .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageOnlineFriends");
     if (!data.message) throw new Error("Enter a message before sending.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -289,7 +423,7 @@ export const messageOnlineFriends = createServerFn({ method: "POST" })
 export const messageAllFriends = createServerFn({ method: "POST" })
   .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageAllFriends");
     if (!data.message) throw new Error("Enter a message before sending.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rows, error } = await supabaseAdmin.from("friend_passwords")
@@ -314,7 +448,7 @@ export const listBans = createServerFn({ method: "GET" }).handler(async () => {
 export const setBan = createServerFn({ method: "POST" })
   .inputValidator((d: { deviceId: string; note?: string; banned: boolean }) => z.object({ deviceId: deviceIdSchema, note: z.string().max(200).optional(), banned: z.boolean() }).parse(d))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("setBan");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const result = data.banned ? await supabaseAdmin.from("banned_devices").upsert({device_id:data.deviceId,note:data.note ?? ""}) : await supabaseAdmin.from("banned_devices").delete().eq("device_id",data.deviceId);
     if (result.error) throw new Error("Could not update browser ban");
@@ -323,7 +457,7 @@ export const setBan = createServerFn({ method: "POST" })
     return { ok: true };
   });
 export const globalPanic = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("globalPanic");
   const { evictUsers, logActivity } = await import("./gate.server");
   await evictUsers();
   await logActivity("admin_panic","Global Panic: kicked all players to geometry");

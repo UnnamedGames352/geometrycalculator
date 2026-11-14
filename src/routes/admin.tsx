@@ -3,6 +3,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   adminLogin,
+  getAdminSecurityOverview,
+  revokeAdminSession,
+  beginAdminTwoFactorSetup,
+  confirmAdminTwoFactorSetup,
+  verifyAdminTwoFactor,
   checkAdminAccess,
   checkAdminAccessServer,
   globalPanic,
@@ -97,6 +102,9 @@ function Admin() {
   const make = useServerFn(createCode);
   const removeCode = useServerFn(deleteCode);
   const lock = useServerFn(lockAdmin);
+  const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
+  const revokeSession = useServerFn(revokeAdminSession);
+  const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
   const [tab, setTab] = useState<AdminTab>("dashboard");
@@ -127,6 +135,10 @@ function Admin() {
     const id = setInterval(() => router.invalidate(), 5000);
     return () => clearInterval(id);
   }, [admin, tabOk]);
+  useEffect(() => {
+    if (!admin || !tabOk) return;
+    loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
+  }, [admin, tabOk, tab]);
 
   if (!accessOk || (admin && tabOk === null)) return null;
   if (!admin || !tabOk) return <AdminGate />;
@@ -194,6 +206,7 @@ function Admin() {
         if (!result.ok) throw new Error("Could not broadcast to friend accounts");
         toast.success(`Broadcast sent to ${result.sent} account${result.sent === 1 ? "" : "s"}`);
       } else {
+        if (!("friend" in editor)) throw new Error("Unsupported account action");
         let patch: Omit<Parameters<typeof editFriend>[0]["data"], "id">;
         if (editor.kind === "rename") patch = { name: editor.value };
         else if (editor.kind === "password") patch = editor.random ? { newRandom: true } : { password: editor.value };
@@ -375,7 +388,7 @@ function Admin() {
         </div>
         <div className="mb-6">
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Recent security events</h3><p className="mt-1 text-sm text-muted-foreground">Latest authentication, blocking, tripwire, and admin events.</p></div><Button variant="outline" size="sm" onClick={() => setTab("activity")}>Open full audit</Button></div>
-          {recentSecurityEvents.length === 0 ? <EmptyState title="No recent security events" detail="New security events will appear here as they happen." /> : <ol className="mt-3 divide-y divide-border rounded-xl border border-border bg-background">{recentSecurityEvents.map((entry) => <li key={`${entry.id}-security`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.created_at)}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind) ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{entry.kind}</span></li>)}</ol>}
+          {recentSecurityEvents.length === 0 ? <EmptyState title="No recent security events" detail="New security events will appear here as they happen." /> : <ol className="mt-3 divide-y divide-border rounded-xl border border-border bg-background">{recentSecurityEvents.map((entry) => <li key={`${entry.id}-security`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind) ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{entry.kind}</span></li>)}</ol>}
         </div>
         <div className="grid gap-3 lg:grid-cols-2"><div className={`rounded-xl border p-5 ${settings.lockdown ? "border-destructive/40 bg-destructive/5" : "border-border bg-background"}`}><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><LockKeyhole className="h-5 w-5" /></span><div><h3 className="font-semibold">Lockdown</h3><p className="text-sm text-muted-foreground">Block access to the games hub and redirect players back to Geometry.</p></div></div><Button variant={settings.lockdown ? "outline" : "secondary"} className="mt-4" onClick={() => settings.lockdown
           ? void perform("Lockdown disabled", () => save({ data: { lockdown: false } }))
@@ -383,11 +396,27 @@ function Admin() {
         <div className="mt-8"><div><h3 className="text-lg font-semibold">Banned browser IDs</h3><p className="mt-1 text-sm text-muted-foreground">Browser IDs can be reset and are not hardware identity.</p></div>
           {bans.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No browser IDs are currently banned.</p> : <ul className="mt-4 divide-y divide-border rounded-xl border border-border">{bans.map((item) => <li key={item.device_id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><code className="break-all font-mono text-xs">{item.device_id}</code><p className="mt-1 text-xs text-muted-foreground">{item.note || "No note"} · added {when(item.created_at)}</p></div><Button variant="outline" size="sm" onClick={() => void perform("Browser ID unbanned", () => ban({ data: { deviceId: item.device_id, banned: false } }))}>Unban</Button></li>)}</ul>}
         </div>
+        <div className="mt-8 space-y-4">
+          <div><h3 className="text-lg font-semibold">Administrator security</h3><p className="mt-1 text-sm text-muted-foreground">Two-factor authentication, active admin sessions, and a protected audit trail.</p></div>
+          {!adminSecurity ? <p className="text-sm text-muted-foreground">Loading administrator security…</p> : <>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background p-4">
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${adminSecurity.twoFactorEnabled ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{adminSecurity.twoFactorEnabled ? "Two-factor enabled" : "Two-factor not enabled"}</span>
+              <span className="text-sm text-muted-foreground">{adminSecurity.remainingRecoveryCodes} recovery codes remaining</span>
+            </div>
+            <div className="flex justify-end"><Button variant="outline" size="sm" onClick={() => void perform("Signed out of this admin session", async () => { await lock(); sessionStorage.removeItem("admin-tab"); sessionStorage.removeItem("gate-tab"); await router.navigate({ to: "/geometry" }); })}>Sign out this session</Button></div>
+            <div><h4 className="font-semibold">Active administrator sessions</h4>
+              {adminSecurity.sessions.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No active sessions.</p> : <ul className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.sessions.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><p className="font-medium">{item.device || "Unknown device"} {item.current && <span className="ml-2 text-xs text-success">Current session</span>}</p><p className="mt-1 text-xs text-muted-foreground">{item.role} · Last active {when(item.last_seen_at)} · Expires {when(item.expires_at)}</p></div><Button size="sm" variant="outline" disabled={item.current} onClick={() => void perform("Admin session revoked", async () => { await revokeSession({ data: { id: item.id } }); setAdminSecurity(await loadAdminSecurity()); })}>Revoke</Button></li>)}</ul>}
+            </div>
+            <div><h4 className="font-semibold">Protected admin audit log</h4><p className="mt-1 text-xs text-muted-foreground">Append-only records of authenticator and session security events.</p>
+              {adminSecurity.audit.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No admin security events recorded yet.</p> : <ol className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.audit.map((entry) => <li key={entry.id} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{entry.action.replace(/_/g, " ")}</span><span className="text-xs text-muted-foreground">{when(entry.created_at)}</span></div><p className="mt-1 text-sm text-muted-foreground">{entry.detail}</p></li>)}</ol>}
+            </div>
+          </>}
+        </div>
       </section>}
 
       {tab === "activity" && <section><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm text-muted-foreground">Recent security and sign-in events. Attempted inputs are kept for audit only.</p></div><Button variant="outline" size="sm" onClick={() => void perform("Activity log cleared", () => clearLog({}))}>Clear log</Button></div>
         <div className="mt-4 flex flex-wrap gap-1.5">{(["all", "failed", "success", "admin"] as const).map((filter) => <FilterPill key={filter} active={activityFilter === filter} onClick={() => setActivityFilter(filter)}>{filter === "all" ? "All" : filter === "failed" ? "Failed" : filter === "success" ? "Success" : "Admin"}</FilterPill>)}</div>
-        {filteredLog.length === 0 ? <EmptyState title="No activity in this view" detail="New activity will appear here as it happens."/> : <ol className="mt-4 divide-y divide-border rounded-xl border border-border bg-background">{filteredLog.map((entry) => <li key={`${entry.id}-${entry.created_at}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.created_at)}</p>{entry.attempted_input && <p className="mt-2 text-xs text-muted-foreground">Submitted input redacted for security.</p>}</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${entry.kind.includes("wrong") || entry.kind === "blocked" || entry.kind === "tripwire" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{entry.kind}</span></li>)}</ol>}
+        {filteredLog.length === 0 ? <EmptyState title="No activity in this view" detail="New activity will appear here as it happens."/> : <ol className="mt-4 divide-y divide-border rounded-xl border border-border bg-background">{filteredLog.map((entry) => <li key={`${entry.id}-${entry.at}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p>{entry.attempted_input && <p className="mt-2 text-xs text-muted-foreground">Submitted input redacted for security.</p>}</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${entry.kind.includes("wrong") || entry.kind === "blocked" || entry.kind === "tripwire" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{entry.kind}</span></li>)}</ol>}
       </section>}
     </section>
 
@@ -433,14 +462,84 @@ function EmptyState({ title, detail }: { title: string; detail: string }) { retu
 function AdminGate() {
   const router = useRouter();
   const login = useServerFn(adminLogin);
+  const beginSetup = useServerFn(beginAdminTwoFactorSetup);
+  const confirmSetup = useServerFn(confirmAdminTwoFactorSetup);
+  const verifySecondFactor = useServerFn(verifyAdminTwoFactor);
   const [deviceId, setDeviceId] = useState("");
+  const [stage, setStage] = useState<"password" | "setup" | "verify" | "recovery">("password");
+  const [secret, setSecret] = useState("");
+  const [uri, setUri] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   useEffect(() => { setDeviceId(getBrowserDeviceId()); }, []);
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+
+  async function onPassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const password = new FormData(event.currentTarget).get("password") as string;
-    const { ok } = await login({ data: { password, deviceId } });
-    if (ok) { sessionStorage.setItem("admin-tab", "1"); sessionStorage.setItem("gate-tab", "1"); await router.invalidate(); }
-    else await router.navigate({ to: "/geometry" });
+    setBusy(true);
+    try {
+      const password = new FormData(event.currentTarget).get("password") as string;
+      const result = await login({ data: { password, deviceId } });
+      if ("requiresSetup" in result && result.requiresSetup) {
+        const setup = await beginSetup();
+        setSecret(setup.secret);
+        setUri(setup.uri);
+        setStage("setup");
+      } else if ("requiresTwoFactor" in result && result.requiresTwoFactor) setStage("verify");
+      else await router.navigate({ to: "/geometry" });
+    } catch { toast.error("Admin sign-in failed."); }
+    finally { setBusy(false); }
   }
-  return <div className="min-h-screen bg-background p-8 font-serif text-foreground"><h1 className="text-center text-3xl font-bold">404 Not Found</h1><hr className="my-4 border-border" /><p className="text-center text-muted-foreground">This page is reserved for the site owner.</p><form onSubmit={onSubmit} className="mx-auto mt-6 max-w-sm space-y-3"><Input name="password" type="password" placeholder="Admin password" autoComplete="off" /><Button type="submit" className="w-full">Unlock</Button></form></div>;
+
+  async function onCode(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const code = new FormData(event.currentTarget).get("code") as string;
+      if (stage === "setup") {
+        const result = await confirmSetup({ data: { code } });
+        if (!result.ok) { toast.error(result.error); return; }
+        setRecoveryCodes(result.recoveryCodes);
+        setStage("recovery");
+      } else {
+        const result = await verifySecondFactor({ data: { code } });
+        if (!result.ok) { toast.error("That code was not accepted."); return; }
+        finishLogin();
+      }
+    } catch { toast.error("Two-factor verification failed."); }
+    finally { setBusy(false); }
+  }
+
+  function finishLogin() {
+    sessionStorage.setItem("admin-tab", "1");
+    sessionStorage.setItem("gate-tab", "1");
+    void router.invalidate();
+  }
+
+  return <div className="min-h-screen bg-background p-8 font-serif text-foreground">
+    <h1 className="text-center text-3xl font-bold">404 Not Found</h1>
+    <hr className="my-4 border-border" />
+    <p className="text-center text-muted-foreground">This page is reserved for the site owner.</p>
+    {stage === "password" && <form onSubmit={onPassword} className="mx-auto mt-6 max-w-sm space-y-3">
+      <Input name="password" type="password" placeholder="Admin password" autoComplete="off" required />
+      <Button type="submit" className="w-full" disabled={!deviceId || busy}>{busy ? "Checking…" : "Continue"}</Button>
+    </form>}
+    {stage === "setup" && <div className="mx-auto mt-6 max-w-md space-y-4">
+      <h2 className="text-center text-xl font-semibold">Set up two-factor authentication</h2>
+      <p className="text-sm text-muted-foreground">Add this account to an authenticator app, then enter the six-digit code it generates.</p>
+      <div className="rounded-lg border border-border bg-muted/30 p-4"><p className="text-xs text-muted-foreground">Manual setup key</p><code className="mt-2 block break-all text-sm">{secret}</code></div>
+      <a className="block break-all text-xs text-primary underline" href={uri}>{uri}</a>
+      <form onSubmit={onCode} className="space-y-3"><Input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="6-digit authenticator code" required /><Button className="w-full" type="submit" disabled={busy}>{busy ? "Verifying…" : "Enable two-factor authentication"}</Button></form>
+    </div>}
+    {stage === "verify" && <form onSubmit={onCode} className="mx-auto mt-6 max-w-sm space-y-3">
+      <p className="text-center text-sm text-muted-foreground">Enter your authenticator code or a one-time recovery code.</p>
+      <Input name="code" autoComplete="one-time-code" placeholder="Authenticator or recovery code" required />
+      <Button className="w-full" type="submit" disabled={busy}>{busy ? "Verifying…" : "Verify and unlock"}</Button>
+    </form>}
+    {stage === "recovery" && <div className="mx-auto mt-6 max-w-md space-y-4">
+      <h2 className="text-center text-xl font-semibold">Save your recovery codes</h2>
+      <p className="text-sm text-muted-foreground">Each code works once. Save these somewhere secure now; they will not be shown again.</p>
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-border p-4">{recoveryCodes.map((code) => <code key={code} className="text-center text-sm">{code}</code>)}</div>
+      <Button className="w-full" onClick={finishLogin}>I saved my recovery codes — continue</Button>
+    </div>}
+  </div>;
 }

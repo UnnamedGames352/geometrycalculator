@@ -13,6 +13,12 @@ type GateSession = {
   at?: number;
   tripwireNotice?: boolean;
   tripwireNoticeShown?: boolean;
+  adminSessionToken?: string | undefined;
+  adminRole?: 'owner' | 'admin' | 'moderator' | 'support' | undefined;
+  pendingAdminAuth?: boolean | undefined;
+  pendingAdminAt?: number | undefined;
+  pendingAdminAttempts?: number | undefined;
+  pendingTotpSecret?: string | undefined;
 };
 
 const config = () => {
@@ -135,10 +141,88 @@ export async function failedAttempt(kind: "wrong" | "admin_wrong", input: string
   if (data) await logActivity("blocked", "Auto-ban: 3 failed attempts within 5 minutes", deviceId);
 }
 
+export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
+  const attempts = (session.data.pendingAdminAttempts ?? 0) + 1;
+  await logActivity("admin_wrong", "Invalid administrator second factor", deviceId);
+  const locked = attempts >= 5;
+  await session.update({
+    ...session.data,
+    pendingAdminAttempts: locked ? undefined : attempts,
+    pendingAdminAuth: !locked,
+    pendingAdminAt: locked ? undefined : session.data.pendingAdminAt,
+    pendingTotpSecret: locked ? undefined : session.data.pendingTotpSecret,
+  });
+  return locked;
+}
+
+export async function startAdminSession(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
+  const { randomUUID } = await import("node:crypto");
+  const token = randomUUID();
+  const hash = createHash("sha256").update(token).digest("hex");
+  const info = await deviceInfo();
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabaseAdmin.from("admin_sessions").insert({
+    session_token_hash: hash, role: "owner", device_id: deviceId,
+    device: info.device, ip: info.ip, expires_at: expiresAt,
+  });
+  if (error) throw new Error("Could not create admin session");
+  await session.update({
+    ...session.data, unlocked: true, admin: true, adminSessionToken: token,
+    adminRole: "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
+    deviceId, at: Date.now(), friendId: undefined, token: undefined,
+  });
+  await recordAdminAudit("admin_session_created", "Administrator session created");
+}
+
+export async function recordAdminAudit(action: string, detail = "") {
+  const session = await getGateSession();
+  const token = session.data.adminSessionToken;
+  if (!token) return;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const hash = createHash("sha256").update(token).digest("hex");
+  const [{ data: row }, info] = await Promise.all([
+    supabaseAdmin.from("admin_sessions").select("id,role").eq("session_token_hash", hash).maybeSingle(),
+    deviceInfo(),
+  ]);
+  const { error } = await supabaseAdmin.from("admin_audit_log").insert({
+    actor_session_id: row?.id ?? null, actor_role: row?.role ?? "owner",
+    action: action.slice(0, 80), detail: detail.slice(0, 1000),
+    device: info.device, ip: info.ip,
+  });
+  if (error) throw new Error("Could not record admin audit event");
+}
+
 export async function isAdmin() {
   const s = await getGateSession();
-  if (!s.data.admin || !(await enforceChromebook(s.data.deviceId))) return false;
-  return !!s.data.deviceId && !(await isDeviceBanned(s.data.deviceId));
+  const token = s.data.adminSessionToken;
+  const deviceId = s.data.deviceId;
+  if (!s.data.admin || !deviceId || !token) return false;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const hash = createHash("sha256").update(token).digest("hex");
+  const invalidateSession = async () => {
+    await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() })
+      .eq("session_token_hash", hash).is("revoked_at", null);
+    await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
+  };
+  if (!(await enforceChromebook(deviceId)) || await isDeviceBanned(deviceId)) {
+    await invalidateSession();
+    return false;
+  }
+  const { data, error } = await supabaseAdmin.from("admin_sessions")
+    .select("id,role,expires_at,revoked_at,last_seen_at")
+    .eq("session_token_hash", hash).maybeSingle();
+  if (error) throw new Error("Could not validate admin session");
+  if (!data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) {
+    if (data && !data.revoked_at) await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id);
+    await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
+    return false;
+  }
+  if (s.data.adminRole !== data.role) await s.update({ ...s.data, adminRole: data.role as GateSession["adminRole"] });
+  if (Date.now() - Date.parse(data.last_seen_at) > 60_000) {
+    await supabaseAdmin.from("admin_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
+  }
+  return true;
 }
 
 /** markSeen: update the friend's "last seen" time (done on hub loads, not every game file). */
