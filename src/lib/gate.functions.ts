@@ -122,7 +122,7 @@ export const adminLogin = createServerFn({ method: "POST" })
     }
     const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
     if (error) throw new Error("Could not check administrator security settings");
-    await session.update({ ...session.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAt: Date.now(), pendingAdminAttempts: 0, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
+    await session.update({ ...session.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAt: Date.now(), pendingAdminAttempts: 0, pendingTotpSecret: undefined, pendingStaffId: undefined, deviceId: data.deviceId, at: Date.now() });
     await logActivity("admin_password_verified", "Admin password verified; second factor required", data.deviceId);
     return security?.totp_enabled ? { ok: false as const, requiresTwoFactor: true as const } : { ok: false as const, requiresSetup: true as const };
   });
@@ -336,7 +336,7 @@ export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => 
     await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", hash).is("revoked_at", null);
     await recordAdminAudit("admin_logout", "Administrator signed out");
   }
-  await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, friendId: undefined, token: undefined });
+  await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, pendingStaffId: undefined, friendId: undefined, token: undefined });
   return { ok: true };
 });
 
