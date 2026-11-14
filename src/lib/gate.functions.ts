@@ -55,7 +55,7 @@ export const listFriends = createServerFn({ method: "GET" }).handler(async () =>
 export const createFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { name: string }) => ({ name: String(d?.name ?? "").trim().slice(0, 40) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("createFriend");
     const { randomBytes } = await import("node:crypto");
     const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const password = Array.from(randomBytes(10), (b) => abc[b % abc.length]).join("");
@@ -67,7 +67,7 @@ export const createFriend = createServerFn({ method: "POST" })
 export const deleteFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("deleteFriend");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("friend_passwords").delete().eq("id", data.id);
     return { ok: true };
@@ -76,7 +76,7 @@ export const deleteFriend = createServerFn({ method: "POST" })
 export const kickFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("kickFriend");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("friend_passwords").update({ active_session: null }).eq("id", data.id);
     return { ok: true };
@@ -204,7 +204,7 @@ export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handle
 export const revokeAdminSession = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("revokeAdminSession");
     const { getGateSession, recordAdminAudit } = await import("./gate.server");
     const session = await getGateSession();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -237,8 +237,15 @@ export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => 
 });
 
 
-async function requireAdmin() {
-  if (!(await (await import("./gate.server")).isAdmin())) throw new Error("Not Found");
+const ROLE_LEVEL: Record<string, number> = { support: 1, moderator: 2, admin: 3, owner: 4 };
+
+async function requireAdmin(action = "admin_action", minimumRole: "support" | "moderator" | "admin" | "owner" = "admin") {
+  const { getGateSession, isAdmin, recordAdminAudit } = await import("./gate.server");
+  if (!(await isAdmin())) throw new Error("Not Found");
+  const session = await getGateSession();
+  const role = session.data.adminRole ?? "owner";
+  if ((ROLE_LEVEL[role] ?? 0) < ROLE_LEVEL[minimumRole]) throw new Error("Not Found");
+  await recordAdminAudit(`${action}_started`, "Administrator action authorized");
 }
 
 export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
@@ -250,7 +257,7 @@ export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
 });
 
 export const createCode = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("createCode");
   const { randomBytes } = await import("node:crypto");
   const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const code = Array.from(randomBytes(8), (b) => abc[b % abc.length]).join("");
@@ -262,7 +269,7 @@ export const createCode = createServerFn({ method: "POST" }).handler(async () =>
 export const deleteCode = createServerFn({ method: "POST" })
   .inputValidator((d: { code: string }) => ({ code: String(d?.code ?? "") }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("deleteCode");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin.from("access_codes").delete().eq("code", data.code);
     return { ok: true };
@@ -294,7 +301,7 @@ export const updateFriend = createServerFn({ method: "POST" })
     expires_at: d?.expires_at === undefined ? undefined : d.expires_at ? new Date(d.expires_at).toISOString() : null,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("updateFriend");
     const patch: { name?: string; password?: string; active_session?: null; paused?: boolean; expires_at?: string | null; admin_note?: string } = {};
     if (data.admin_note !== undefined) patch.admin_note = data.admin_note;
     if (data.name !== undefined) patch.name = data.name;
@@ -320,7 +327,7 @@ export const getActivity = createServerFn({ method: "GET" }).handler(async () =>
 });
 
 export const clearActivity = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("clearActivity");
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   await supabaseAdmin.from("activity_log").delete().not("id", "is", null);
   return { ok: true };
@@ -333,7 +340,7 @@ export const saveSettings = createServerFn({ method: "POST" })
     kickAll: !!d?.kickAll,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("saveSettings");
     const { getSettings } = await import("./gate.server");
     const cur = await getSettings();
     const next = {
@@ -354,7 +361,7 @@ export const saveSettings = createServerFn({ method: "POST" })
 export const messageFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? "").trim(), message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageFriend");
     if (!data.id) throw new Error("Friend id is required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
@@ -368,7 +375,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
     message: String(d?.message ?? "").trim().slice(0, 300),
   }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageOnlineFriend");
     if (!data.id || !data.message) throw new Error("A player and message are required.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -385,7 +392,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
 export const messageOnlineFriends = createServerFn({ method: "POST" })
   .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageOnlineFriends");
     if (!data.message) throw new Error("Enter a message before sending.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -401,7 +408,7 @@ export const messageOnlineFriends = createServerFn({ method: "POST" })
 export const messageAllFriends = createServerFn({ method: "POST" })
   .inputValidator((d: { message: string }) => ({ message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("messageAllFriends");
     if (!data.message) throw new Error("Enter a message before sending.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rows, error } = await supabaseAdmin.from("friend_passwords")
@@ -426,7 +433,7 @@ export const listBans = createServerFn({ method: "GET" }).handler(async () => {
 export const setBan = createServerFn({ method: "POST" })
   .inputValidator((d: { deviceId: string; note?: string; banned: boolean }) => z.object({ deviceId: deviceIdSchema, note: z.string().max(200).optional(), banned: z.boolean() }).parse(d))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("setBan");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const result = data.banned ? await supabaseAdmin.from("banned_devices").upsert({device_id:data.deviceId,note:data.note ?? ""}) : await supabaseAdmin.from("banned_devices").delete().eq("device_id",data.deviceId);
     if (result.error) throw new Error("Could not update browser ban");
@@ -435,7 +442,7 @@ export const setBan = createServerFn({ method: "POST" })
     return { ok: true };
   });
 export const globalPanic = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("globalPanic");
   const { evictUsers, logActivity } = await import("./gate.server");
   await evictUsers();
   await logActivity("admin_panic","Global Panic: kicked all players to geometry");
