@@ -23,6 +23,10 @@ describe("admin security helpers", () => {
     expect(hashRecoveryCode(codes[0])).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("verifies RFC 6238 authenticator codes", () => {
+    expect(verifyTotp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "287082", 59_000)).toBe(true);
+  });
+
   it("rejects malformed authenticator codes", () => {
     expect(verifyTotp("INVALID", "12345")).toBe(false);
   });
