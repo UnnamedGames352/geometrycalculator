@@ -195,15 +195,26 @@ export async function recordAdminAudit(action: string, detail = "") {
 
 export async function isAdmin() {
   const s = await getGateSession();
-  if (!s.data.admin || !s.data.deviceId || !s.data.adminSessionToken || !(await enforceChromebook(s.data.deviceId))) return false;
-  if (await isDeviceBanned(s.data.deviceId)) return false;
+  const token = s.data.adminSessionToken;
+  const deviceId = s.data.deviceId;
+  if (!s.data.admin || !deviceId || !token) return false;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const hash = createHash("sha256").update(s.data.adminSessionToken).digest("hex");
+  const hash = createHash("sha256").update(token).digest("hex");
+  const invalidateSession = async () => {
+    await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() })
+      .eq("session_token_hash", hash).is("revoked_at", null);
+    await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
+  };
+  if (!(await enforceChromebook(deviceId)) || await isDeviceBanned(deviceId)) {
+    await invalidateSession();
+    return false;
+  }
   const { data, error } = await supabaseAdmin.from("admin_sessions")
     .select("id,role,expires_at,revoked_at,last_seen_at")
     .eq("session_token_hash", hash).maybeSingle();
   if (error) throw new Error("Could not validate admin session");
   if (!data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) {
+    if (data && !data.revoked_at) await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id);
     await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
     return false;
   }
