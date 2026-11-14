@@ -149,6 +149,7 @@ export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof
     ...session.data,
     pendingAdminAttempts: locked ? undefined : attempts,
     pendingAdminAuth: !locked,
+    pendingAdminAt: locked ? undefined : session.data.pendingAdminAt,
     pendingTotpSecret: locked ? undefined : session.data.pendingTotpSecret,
   });
   return locked;
