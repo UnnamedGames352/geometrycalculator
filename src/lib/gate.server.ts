@@ -33,13 +33,13 @@ const config = () => {
 
 export const getGateSession = () => useSession<GateSession>(config());
 
-export type SiteSettings = { lockdown: boolean; hidden_games: string[]; kick_all_at: string | null };
+export type SiteSettings = { lockdown: boolean; lockdown_level: number; hidden_games: string[]; kick_all_at: string | null; broadcast_message: string | null };
 
 export async function getSettings(): Promise<SiteSettings> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, hidden_games, kick_all_at").eq("id", 1).maybeSingle();
+  const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, lockdown_level, hidden_games, kick_all_at, broadcast_message").eq("id", 1).maybeSingle();
   if (error) throw new Error("Could not check site settings");
-  return data ?? { lockdown: false, hidden_games: [], kick_all_at: null };
+  return data ?? { lockdown: false, lockdown_level: 0, hidden_games: [], kick_all_at: null, broadcast_message: null };
 }
 
 // Every activity entry includes the browser ID when one has been assigned, so an
@@ -58,7 +58,7 @@ export async function evictUsers(lockdown?: boolean) {
   if (error) throw new Error("Could not evict sessions");
 }
 
-const TRIPWIRE_NOTICE = "Access was stopped because this site only allows Chrome on ChromeOS (Chromebooks). The security tripwire placed the hub in lockdown and ended active player sessions. You are seeing this explanation instead of a crashed page.";
+const TRIPWIRE_NOTICE = "EMERGENCY LOCKDOWN — A confirmed security tripwire was detected. This browser has been banned, all active player sessions were terminated, and the site is in Level 5 lockdown.";
 
 async function latestEvictionEvent(): Promise<{ at: string; kind: string } | null> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -114,12 +114,16 @@ export async function enforceChromebook(deviceId?: string) {
     return false;
   }
 
-  await logActivity("tripwire", `TRIPWIRE: Non-Chromebook attempted access (${d.device}). Initiating lockdown and kicking all users.`, deviceId);
-  await evictUsers(true);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  if (deviceId && DEVICE_ID_PATTERN.test(deviceId)) {
-    const { error } = await supabaseAdmin.from("banned_devices").upsert({ device_id: deviceId, note: "Tripwire: Non-Chromebook attempt" });
-    if (error) throw new Error("Could not ban browser");
+  if (deviceId && DEVICE_ID_PATTERN.test(deviceId) && d.user_agent) {
+    const { error } = await supabaseAdmin.rpc("tripwire_emergency", {
+      p_device_id: deviceId,
+      p_note: `Confirmed tripwire: non-Chromebook player access (${d.device})`,
+    });
+    if (error) throw new Error("Could not execute tripwire emergency response");
+    await logActivity("tripwire", `TRIPWIRE CONFIRMED: ${d.device}. Device banned; Level 5 enabled; active sessions terminated; emergency message queued.`, deviceId);
+  } else {
+    await logActivity("tripwire_observed", `Non-Chromebook request observed without a verifiable browser ID (${d.device}); no site-wide response was triggered.`, deviceId);
   }
   await session.update({
     ...session.data,
