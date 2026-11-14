@@ -137,7 +137,7 @@ export const beginAdminTwoFactorSetup = createServerFn({ method: "POST" }).handl
 });
 
 export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
-  .inputValidator((d: { code: string }) => z.object({ code: z.string().regex(/^\\d{6}$/) }).parse(d))
+  .inputValidator((d: { code: string }) => z.object({ code: z.string().regex(/^\d{6}$/) }).parse(d))
   .handler(async ({ data }) => {
     const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
     const session = await getGateSession();
@@ -187,8 +187,8 @@ export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
       if (index >= 0) { recoveryHashes = recoveryHashes.filter((_, i) => i !== index); accepted = true; }
     }
     if (!accepted) {
-      const { failedAttempt } = await import("./gate.server");
-      await failedAttempt("admin_wrong", data.code, session.data.deviceId);
+      const { failedAdminSecondFactor } = await import("./gate.server");
+      await failedAdminSecondFactor(session, session.data.deviceId);
       return { ok: false as const };
     }
     if (recoveryHashes.length !== (security.recovery_code_hashes ?? []).length) {
