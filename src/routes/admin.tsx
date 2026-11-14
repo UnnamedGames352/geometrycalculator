@@ -46,7 +46,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, SlidersHorizontal, Users, X } from "lucide-react";
+import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, RefreshCw, Search, Shield, SlidersHorizontal, Users, X } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
@@ -205,7 +205,7 @@ function Admin() {
   const blockedEvents = log.filter((entry) => ["blocked", "tripwire"].includes(entry.kind)).length;
   const tripwireEvents = log.filter((entry) => entry.kind === "tripwire").length;
   const adminSignIns = log.filter((entry) => entry.kind === "admin_login").length;
-  const recentSecurityEvents = log.filter((entry) => ["wrong", "admin_wrong", "blocked", "tripwire", "ban", "admin_login", "admin_panic", "admin_lockdown"].includes(entry.kind)).slice(0, 8);
+  const recentSecurityEvents = log.filter((entry) => ["wrong", "admin_wrong", "blocked", "tripwire", "ban", "admin_login", "admin_panic", "admin_lockdown", "emergency_protocol"].includes(entry.kind)).slice(0, 8);
   const filteredLog = log.filter((entry) => activityFilter === "all"
     || (activityFilter === "failed" && ["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind))
     || (activityFilter === "success" && ["code", "login", "admin_login"].includes(entry.kind))
@@ -441,7 +441,7 @@ function Admin() {
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Game availability</h2><p className="mt-1 text-sm text-muted-foreground">Hide games from the hub without deleting their deployments. Direct game routes remain protected by the existing access checks.</p></div><span className="rounded-full bg-muted px-3 py-1.5 text-xs">{gameCatalog.length - settings.hidden_games.length} visible · {settings.hidden_games.length} hidden</span></div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{gameCatalog.map((game) => { const hidden = settings.hidden_games.includes(game.id); return <label key={game.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-3 text-sm"><span className="font-medium">{game.name}</span><input type="checkbox" checked={!hidden} onChange={(event) => { const next = event.target.checked ? settings.hidden_games.filter((id) => id !== game.id) : [...settings.hidden_games, game.id]; void perform(`${game.name} visibility updated`, () => save({ data: { hidden_games: next } })); }} aria-label={`Show ${game.name} in hub`} /></label>; })}</div>
         </div>
-        <div><div className="mb-4"><h2 className="text-lg font-semibold">Platform analytics</h2><p className="mt-1 text-sm text-muted-foreground">Account and activity data currently stored by the hub. Playtime totals are recorded values and may not include an active session until it ends.</p></div>
+        <div><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">Platform analytics</h2><p className="mt-1 text-sm text-muted-foreground">Account and activity data currently stored by the hub. Playtime totals are recorded values and may not include an active session until it ends.</p></div><Button variant="outline" size="sm" onClick={() => void loadAnalytics().then(setPlatformAnalytics).catch(() => toast.error("Could not refresh analytics."))}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></div>
           {!platformAnalytics ? <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Loading platform analytics…</p> : <>
             <div className="grid grid-cols-2 gap-3 xl:grid-cols-4"><StatCard label="Player accounts" value={platformAnalytics.totalPlayers} detail="All created player accounts" accent="text-chart-1" /><StatCard label="Online now" value={platformAnalytics.onlinePlayers} detail="Seen in the last two minutes" accent="text-success" /><StatCard label="Sign-ins · 7 days" value={platformAnalytics.signIns7d} detail="Recorded player login events" accent="text-chart-3" /><StatCard label="Recorded playtime" value={formatDuration(platformAnalytics.totalPlaySeconds)} detail="Across all accounts and games" accent="text-chart-2" /></div>
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
