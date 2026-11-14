@@ -278,8 +278,8 @@ function Admin() {
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-5">
         <Button variant={settings.lockdown ? "outline" : "secondary"} onClick={() => settings.lockdown
-          ? void perform("Lockdown disabled", () => save({ data: { lockdown: false } }))
-          : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdown: true } }); toast.success("Lockdown enabled"); await refresh(); })}>
+          ? void perform("Lockdown disabled", () => save({ data: { lockdownLevel: 1 } }))
+          : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdownLevel: 3 } }); toast.success("Lockdown enabled"); await refresh(); })}>
           <LockKeyhole className="mr-2 h-4 w-4" />{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}
         </Button>
         <Button variant="destructive" onClick={() => ask("Global Panic", "This immediately signs out every player and sends them to Geometry. This cannot be undone.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>
