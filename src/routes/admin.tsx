@@ -95,8 +95,8 @@ const emergencyLevels = [
   { level: 0, name: "Level 0 · Normal", description: "Normal operation. Player access is unaffected." },
   { level: 1, name: "Level 1 · Elevated monitoring", description: "Display an operator notice and keep normal player access enabled." },
   { level: 2, name: "Level 2 · Restricted access", description: "Block new player sign-ins. Existing sessions can continue." },
-  { level: 3, name: "Level 3 · Site lockdown", description: "Block new sign-ins, enable lockdown, and evict active players." },
-  { level: 4, name: "Level 4 · Full evacuation", description: "Immediately lock the site and evict all active player sessions." },
+  { level: 3, name: "Level 3 · Site lockdown", description: "Activate lockdown. Active players are redirected out on their next security check." },
+  { level: 4, name: "Level 4 · Full evacuation", description: "Lock the site and immediately clear stored player sessions across the platform." },
 ] as const;
 type AdminTab = typeof tabs[number]["id"];
 type Friend = ReturnType<typeof Route.useLoaderData>["friends"][number];
@@ -426,14 +426,14 @@ function Admin() {
 
       {tab === "platform" && <section className="space-y-7">
         <div className="rounded-xl border border-border bg-background p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Emergency protocol</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Choose an operational level. Levels 2–4 affect player access; levels 3–4 also activate lockdown and evict active players.</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${settings.emergency_level >= 3 ? "bg-destructive/10 text-destructive" : settings.emergency_level === 2 ? "bg-chart-3/10 text-chart-3" : "bg-success/10 text-success"}`}>{emergencyLevels.find((item) => item.level === settings.emergency_level)?.name ?? "Unknown level"}</span></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Emergency protocol</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Choose an operational level. Level 2 blocks new sign-ins. Level 3 activates lockdown; level 4 also clears stored player sessions.</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${settings.emergency_level >= 3 ? "bg-destructive/10 text-destructive" : settings.emergency_level === 2 ? "bg-chart-3/10 text-chart-3" : "bg-success/10 text-success"}`}>{emergencyLevels.find((item) => item.level === settings.emergency_level)?.name ?? "Unknown level"}</span></div>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <label className="block text-sm font-medium">Protocol level<select className="mt-1 h-11 w-full rounded-md border border-border bg-card px-3" value={emergencyLevel} onChange={(event) => setEmergencyLevel(Number(event.target.value))}>{emergencyLevels.map((item) => <option key={item.level} value={item.level}>{item.name}</option>)}</select><p className="mt-2 text-xs text-muted-foreground">{emergencyLevels.find((item) => item.level === emergencyLevel)?.description}</p></label>
             <label className="block text-sm font-medium">Player-facing notice <Textarea className="mt-1 min-h-24" maxLength={300} value={emergencyNotice} onChange={(event) => setEmergencyNotice(event.target.value)} placeholder="Optional notice shown in the hub during the protocol…" /><span className="mt-1 block text-xs text-muted-foreground">{emergencyNotice.length}/300 characters</span></label>
           </div>
           <div className="mt-4 flex justify-end"><Button variant={emergencyLevel >= 3 ? "destructive" : "default"} onClick={() => {
             const apply = async () => { await perform("Emergency protocol updated", () => setEmergency({ data: { level: emergencyLevel, notice: emergencyNotice } })); };
-            if (emergencyLevel >= 3 || settings.emergency_level >= 3) ask("Change emergency protocol?", emergencyLevel >= 3 ? "This will activate lockdown and immediately evict active players." : "This will de-escalate the current emergency protocol and may restore player access.", "Confirm protocol change", apply);
+            if (emergencyLevel >= 3 || settings.emergency_level >= 3) ask("Change emergency protocol?", emergencyLevel >= 4 ? "This will activate lockdown and immediately clear stored player sessions." : "This will activate lockdown and redirect active players out." : "This will de-escalate the current emergency protocol and may restore player access.", "Confirm protocol change", apply);
             else void apply();
           }}>Apply protocol level {emergencyLevel}</Button></div>
         </div>
