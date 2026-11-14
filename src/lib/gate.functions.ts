@@ -117,7 +117,7 @@ export const adminLogin = createServerFn({ method: "POST" })
     }
     const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
     if (error) throw new Error("Could not check administrator security settings");
-    await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAttempts: 0, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
+    await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAt: Date.now(), pendingAdminAttempts: 0, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
     await logActivity("admin_password_verified", "Admin password verified; second factor required", data.deviceId);
     return security?.totp_enabled ? { ok: false as const, requiresTwoFactor: true as const } : { ok: false as const, requiresSetup: true as const };
   });
@@ -125,7 +125,7 @@ export const adminLogin = createServerFn({ method: "POST" })
 export const beginAdminTwoFactorSetup = createServerFn({ method: "POST" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
   const session = await getGateSession();
-  if (!session.data.pendingAdminAuth || !session.data.deviceId) throw new Error("Verify the admin password first.");
+  if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000) throw new Error("Admin verification expired. Sign in again.");
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: currentSecurity, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
   if (error) throw new Error("Could not check authenticator status");
@@ -142,7 +142,7 @@ export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
     const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
     const session = await getGateSession();
     const secret = session.data.pendingTotpSecret;
-    if (!session.data.pendingAdminAuth || !session.data.deviceId || !secret) throw new Error("Start authenticator setup first.");
+    if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000 || !secret) throw new Error("Admin verification expired. Sign in again.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: existingSecurity, error: existingError } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
     if (existingError) throw new Error("Could not check authenticator status");
@@ -171,7 +171,7 @@ export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
     const session = await getGateSession();
-    if (!session.data.pendingAdminAuth || !session.data.deviceId) return { ok: false as const };
+    if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000) return { ok: false as const };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled,totp_secret_ciphertext").eq("id", 1).maybeSingle();
     if (error || !security?.totp_enabled || !security.totp_secret_ciphertext) return { ok: false as const };
@@ -247,7 +247,7 @@ export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => 
     await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", hash).is("revoked_at", null);
     await recordAdminAudit("admin_logout", "Administrator signed out");
   }
-  await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, friendId: undefined, token: undefined });
+  await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, friendId: undefined, token: undefined });
   return { ok: true };
 });
 
