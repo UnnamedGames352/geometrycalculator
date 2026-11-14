@@ -110,6 +110,11 @@ export const adminLogin = createServerFn({ method: "POST" })
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
     const session = await getGateSession();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (session.data.adminSessionToken) {
+      const { createHash } = await import("node:crypto");
+      const oldHash = createHash("sha256").update(session.data.adminSessionToken).digest("hex");
+      await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", oldHash).is("revoked_at", null);
+    }
     const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
     if (error) throw new Error("Could not check administrator security settings");
     await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
@@ -121,6 +126,10 @@ export const beginAdminTwoFactorSetup = createServerFn({ method: "POST" }).handl
   const { getGateSession } = await import("./gate.server");
   const session = await getGateSession();
   if (!session.data.pendingAdminAuth || !session.data.deviceId) throw new Error("Verify the admin password first.");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: currentSecurity, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
+  if (error) throw new Error("Could not check authenticator status");
+  if (currentSecurity?.totp_enabled) throw new Error("Two-factor authentication is already enabled. Use an authenticator code to sign in.");
   const { generateTotpSecret, buildTotpUri } = await import("./admin-security");
   const secret = generateTotpSecret();
   await session.update({ ...session.data, pendingTotpSecret: secret });
@@ -134,8 +143,16 @@ export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
     const session = await getGateSession();
     const secret = session.data.pendingTotpSecret;
     if (!session.data.pendingAdminAuth || !session.data.deviceId || !secret) throw new Error("Start authenticator setup first.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: existingSecurity, error: existingError } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
+    if (existingError) throw new Error("Could not check authenticator status");
+    if (existingSecurity?.totp_enabled) throw new Error("Two-factor authentication is already enabled.");
     const { verifyTotp, encryptTotpSecret, generateRecoveryCodes, hashRecoveryCode } = await import("./admin-security");
-    if (!verifyTotp(secret, data.code)) return { ok: false as const, error: "That authenticator code is not valid." };
+    if (!verifyTotp(secret, data.code)) {
+      const { failedAttempt } = await import("./gate.server");
+      await failedAttempt("admin_wrong", data.code, session.data.deviceId);
+      return { ok: false as const, error: "That authenticator code is not valid." };
+    }
     const sessionSecret = process.env["SESSION_SECRET"];
     if (!sessionSecret) throw new Error("Session encryption is unavailable.");
     const recoveryCodes = generateRecoveryCodes();
@@ -170,7 +187,11 @@ export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
       const index = recoveryHashes.indexOf(candidate);
       if (index >= 0) { recoveryHashes = recoveryHashes.filter((_, i) => i !== index); accepted = true; }
     }
-    if (!accepted) return { ok: false as const };
+    if (!accepted) {
+      const { failedAttempt } = await import("./gate.server");
+      await failedAttempt("admin_wrong", data.code, session.data.deviceId);
+      return { ok: false as const };
+    }
     if (recoveryHashes.length !== (security.recovery_code_hashes ?? []).length) {
       const { error: updateError } = await supabaseAdmin.from("admin_security").update({ recovery_code_hashes: recoveryHashes, updated_at: new Date().toISOString() }).eq("id", 1);
       if (updateError) throw new Error("Could not consume recovery code");
