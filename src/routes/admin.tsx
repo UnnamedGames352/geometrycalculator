@@ -44,7 +44,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, UserRound, Users, X } from "lucide-react";
+import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, Users, X } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
