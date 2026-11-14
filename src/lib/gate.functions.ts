@@ -443,9 +443,9 @@ export const saveSettings = createServerFn({ method: "POST" })
       lockdown: data.lockdown ?? cur.lockdown,
       hidden_games: data.hidden_games ?? cur.hidden_games,
       kick_all_at: data.kickAll || data.lockdown === true ? new Date().toISOString() : cur.kick_all_at,
-      emergency_level: cur.emergency_level,
-      emergency_notice: cur.emergency_notice,
-      emergency_updated_at: cur.emergency_updated_at,
+      emergency_level: data.lockdown === false ? 0 : cur.emergency_level,
+      emergency_notice: data.lockdown === false ? "" : cur.emergency_notice,
+      emergency_updated_at: data.lockdown === false ? new Date().toISOString() : cur.emergency_updated_at,
     };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("site_settings").upsert(next);
