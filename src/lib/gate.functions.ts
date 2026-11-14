@@ -247,7 +247,7 @@ export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => 
     await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", hash).is("revoked_at", null);
     await recordAdminAudit("admin_logout", "Administrator signed out");
   }
-  await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingTotpSecret: undefined });
+  await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, friendId: undefined, token: undefined });
   return { ok: true };
 });
 
