@@ -546,6 +546,9 @@ export const submitPlayerAppeal = createServerFn({ method: "POST" })
       .select("id,name,device_id").eq("password", data.password.toUpperCase()).maybeSingle();
     if (error) throw new Error("Appeal service is unavailable.");
     if (!friend) throw new Error("We couldn't verify that account. Check the account code and try again.");
+    const { consumeSecurityRateLimit } = await import("./gate.server");
+    const rateLimit = await consumeSecurityRateLimit("appeal_submit", friend.id, 3, 86_400, 86_400);
+    if (!rateLimit.allowed) throw new Error("Too many appeal submissions. Try again later.");
     const { data: existing, error: existingError } = await supabaseAdmin.from("player_appeals")
       .select("id").eq("friend_id", friend.id).eq("status", "pending").limit(1).maybeSingle();
     if (existingError) throw new Error("Appeal service is unavailable.");
