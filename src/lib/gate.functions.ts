@@ -16,8 +16,14 @@ export const redeemCode = createServerFn({ method: "POST" })
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
     if ((await getSettings()).lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
-    const code = data.code.trim().toUpperCase();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+    const { data: deviceHold, error: deviceHoldError } = await supabaseAdmin.from("player_moderation")
+      .select("reason,expires_at").eq("device_id", data.deviceId).is("lifted_at", null)
+      .or(`expires_at.is.null,expires_at.gt.${now}`).limit(1).maybeSingle();
+    if (deviceHoldError) throw new Error("Could not check player moderation status");
+    if (deviceHold) { await logActivity("blocked", "Temporarily or permanently suspended browser attempted access", data.deviceId); return { ok: false as const }; }
+    const code = data.code.trim().toUpperCase();
     const s = await getGateSession();
     const { data: rows, error } = await supabaseAdmin.from("access_codes").delete().eq("code", code).select("code");
     if (error) throw new Error("Could not validate code");
@@ -29,6 +35,11 @@ export const redeemCode = createServerFn({ method: "POST" })
     const { data: friend, error: friendError } = await supabaseAdmin.from("friend_passwords").select("id,name,paused,expires_at").eq("password",code).maybeSingle();
     if (friendError) throw new Error("Could not validate password");
     if (!friend) { await failedAttempt("wrong",data.code,data.deviceId); return { ok: false as const }; }
+    const { data: accountHold, error: accountHoldError } = await supabaseAdmin.from("player_moderation")
+      .select("reason,expires_at").eq("friend_id", friend.id).is("lifted_at", null)
+      .or(`expires_at.is.null,expires_at.gt.${now}`).limit(1).maybeSingle();
+    if (accountHoldError) throw new Error("Could not check player moderation status");
+    if (accountHold) { await logActivity("blocked", `${friend.name}: account is suspended`, data.deviceId); return { ok: false as const }; }
     if (friend.paused || (friend.expires_at && Date.parse(friend.expires_at) <= Date.now())) {
       await logActivity("blocked", `${friend.name}: password paused or expired`,data.deviceId,data.code); return { ok: false as const };
     }
@@ -373,6 +384,17 @@ export const saveSettings = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+async function recordPlayerMessage(targetType: "player" | "online" | "all", targetId: string | null, targetLabel: string, message: string, recipientCount: number) {
+  const { getGateSession } = await import("./gate.server");
+  const session = await getGateSession();
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { error } = await supabaseAdmin.from("player_message_history").insert({
+    target_type: targetType, target_id: targetId, target_label: targetLabel,
+    message, recipient_count: recipientCount, actor_role: session.data.adminRole ?? "owner",
+  });
+  if (error) throw new Error("Message sent, but its history could not be saved.");
+}
+
 export const messageFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string; message: string }) => ({ id: String(d?.id ?? "").trim(), message: String(d?.message ?? "").trim().slice(0, 300) }))
   .handler(async ({ data }) => {
@@ -381,6 +403,7 @@ export const messageFriend = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("friend_passwords").update({ message: data.message || null }).eq("id", data.id);
     if (error) throw new Error("Could not send the message.");
+    await recordPlayerMessage("player", data.id, data.id, data.message, data.message ? 1 : 0);
     return { ok: true as const };
   });
 
@@ -401,6 +424,7 @@ export const messageOnlineFriend = createServerFn({ method: "POST" })
       .or(`expires_at.is.null,expires_at.gt.${now}`).gt("last_seen", cutoff).select("id");
     if (error) throw new Error("Could not send the message.");
     if (!rows?.length) return { ok: false as const, error: "That player is no longer online." };
+    await recordPlayerMessage("player", data.id, data.id, data.message, rows.length);
     return { ok: true as const, sent: 1 };
   });
 
@@ -417,6 +441,7 @@ export const messageOnlineFriends = createServerFn({ method: "POST" })
       .not("active_session", "is", null).eq("paused", false)
       .or(`expires_at.is.null,expires_at.gt.${now}`).gt("last_seen", cutoff).select("id");
     if (error) throw new Error("Could not broadcast to online players.");
+    await recordPlayerMessage("online", null, "Online players", data.message, rows?.length ?? 0);
     return { ok: true as const, sent: rows?.length ?? 0 };
   });
 
@@ -430,6 +455,7 @@ export const messageAllFriends = createServerFn({ method: "POST" })
       .update({ message: data.message })
       .not("id", "is", null).select("id");
     if (error) throw new Error("Could not broadcast to friend accounts.");
+    await recordPlayerMessage("all", null, "All player accounts", data.message, rows?.length ?? 0);
     return { ok: true as const, sent: rows?.length ?? 0 };
   });
 
