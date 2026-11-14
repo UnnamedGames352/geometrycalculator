@@ -3,13 +3,12 @@ DROP TRIGGER IF EXISTS banned_devices_start_lockdown ON public.banned_devices;
 DROP FUNCTION IF EXISTS public.broadcast_ban_lockdown();
 
 ALTER TABLE public.site_settings
-  ADD COLUMN IF NOT EXISTS lockdown_level smallint NOT NULL DEFAULT 0
-  CHECK (lockdown_level BETWEEN 0 AND 5),
+  ADD COLUMN IF NOT EXISTS lockdown_level smallint NOT NULL DEFAULT 1
+  CHECK (lockdown_level BETWEEN 1 AND 5),
   ADD COLUMN IF NOT EXISTS broadcast_message text;
 
 UPDATE public.site_settings
-SET lockdown_level = CASE WHEN lockdown THEN 5 ELSE 0 END
-WHERE lockdown_level = 0 AND lockdown = true;
+SET lockdown_level = CASE WHEN lockdown THEN 5 ELSE 1 END;
 
 -- Individual staff identities. Passwords are stored as salted scrypt hashes;
 -- authenticator secrets are encrypted by the application before storage.
