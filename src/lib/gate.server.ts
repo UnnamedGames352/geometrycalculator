@@ -114,6 +114,7 @@ export async function enforceChromebook(deviceId?: string) {
       unlocked: false,
       admin: false,
       deviceId: deviceId ?? session.data.deviceId,
+      at: Date.parse(latestEvent.at),
       tripwireNotice: true,
       tripwireNoticeShown: false,
     });
