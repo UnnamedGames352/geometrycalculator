@@ -39,7 +39,7 @@ export type SiteSettings = {
   kick_all_at: string | null;
   emergency_level: number;
   emergency_notice: string;
-  emergency_updated_at: string | null;
+  emergency_updated_at: string;
 };
 
 export async function getSettings(): Promise<SiteSettings> {
@@ -48,7 +48,7 @@ export async function getSettings(): Promise<SiteSettings> {
     .select("lockdown, hidden_games, kick_all_at, emergency_level, emergency_notice, emergency_updated_at")
     .eq("id", 1).maybeSingle();
   if (error) throw new Error("Could not check site settings");
-  return data ?? { lockdown: false, hidden_games: [], kick_all_at: null, emergency_level: 0, emergency_notice: "", emergency_updated_at: null };
+  return data ?? { lockdown: false, hidden_games: [], kick_all_at: null, emergency_level: 0, emergency_notice: "", emergency_updated_at: new Date(0).toISOString() };
 }
 
 // Every activity entry includes the browser ID when one has been assigned, so an
