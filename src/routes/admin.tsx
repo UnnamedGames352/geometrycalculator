@@ -399,7 +399,7 @@ function Admin() {
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Recent security events</h3><p className="mt-1 text-sm text-muted-foreground">Latest authentication, blocking, tripwire, and admin events.</p></div><Button variant="outline" size="sm" onClick={() => setTab("activity")}>Open full audit</Button></div>
           {recentSecurityEvents.length === 0 ? <EmptyState title="No recent security events" detail="New security events will appear here as they happen." /> : <ol className="mt-3 divide-y divide-border rounded-xl border border-border bg-background">{recentSecurityEvents.map((entry) => <li key={`${entry.id}-security`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind) ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{entry.kind}</span></li>)}</ol>}
         </div>
-        <div className="rounded-xl border border-border bg-background p-5">
+        {(currentAdminRole === "admin" || currentAdminRole === "owner") && <div className="rounded-xl border border-border bg-background p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h3 className="font-semibold">Site lockdown level</h3><p className="mt-1 text-sm text-muted-foreground">Changes apply on the next player check (normally within a few seconds). Level 5 immediately ends sessions and sends the emergency notice.</p></div>
             <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${settings.lockdown_level >= 3 ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}>Level {settings.lockdown_level} · {settings.lockdown_level >= 3 ? "Restricted" : "Operational"}</span>
@@ -420,11 +420,11 @@ function Admin() {
               <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
             </button>)}
           </div>
-        </div>
-        <div className="mt-5 rounded-xl border border-border bg-background p-5">
+        </div>}
+        {currentAdminRole === "owner" && <div className="mt-5 rounded-xl border border-border bg-background p-5">
           <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Immediately terminate all active player sessions without changing the lockdown level.</p></div></div>
           <Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button>
-        </div>
+        </div>}
         <div className="mt-8"><div><h3 className="text-lg font-semibold">Banned browser IDs</h3><p className="mt-1 text-sm text-muted-foreground">Browser IDs can be reset and are not hardware identity.</p></div>
           {bans.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No browser IDs are currently banned.</p> : <ul className="mt-4 divide-y divide-border rounded-xl border border-border">{bans.map((item) => <li key={item.device_id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><code className="break-all font-mono text-xs">{item.device_id}</code><p className="mt-1 text-xs text-muted-foreground">{item.note || "No note"} · added {when(item.created_at)}</p></div>{currentAdminRole !== "support" && <Button variant="outline" size="sm" onClick={() => void perform("Browser ID unbanned", () => ban({ data: { deviceId: item.device_id, banned: false } }))}>Unban</Button>}</li>)}</ul>}
         </div>
