@@ -212,6 +212,18 @@ export type Database = {
         Update: { id?: string; target_type?: string; target_id?: string | null; target_label?: string; message?: string; recipient_count?: number; actor_role?: string; created_at?: string }
         Relationships: []
       }
+      security_rate_limits: {
+        Row: { key_hash: string; action: string; attempt_count: number; window_started_at: string; blocked_until: string | null; updated_at: string }
+        Insert: { key_hash: string; action: string; attempt_count?: number; window_started_at?: string; blocked_until?: string | null; updated_at?: string }
+        Update: { key_hash?: string; action?: string; attempt_count?: number; window_started_at?: string; blocked_until?: string | null; updated_at?: string }
+        Relationships: []
+      }
+      security_alerts: {
+        Row: { id: string; severity: string; category: string; title: string; detail: string; device_id: string | null; ip: string | null; status: string; created_at: string; acknowledged_at: string | null; resolved_at: string | null }
+        Insert: { id?: string; severity: string; category: string; title: string; detail?: string; device_id?: string | null; ip?: string | null; status?: string; created_at?: string; acknowledged_at?: string | null; resolved_at?: string | null }
+        Update: { id?: string; severity?: string; category?: string; title?: string; detail?: string; device_id?: string | null; ip?: string | null; status?: string; created_at?: string; acknowledged_at?: string | null; resolved_at?: string | null }
+        Relationships: []
+      }
       site_settings: {
         Row: {
           emergency_level: number
@@ -268,6 +280,7 @@ export type Database = {
       evict_gate_users: { Args: { p_lockdown?: boolean }; Returns: undefined }
       record_device_failure: { Args: { p_device_id: string }; Returns: boolean }
       consume_admin_recovery_code: { Args: { p_code_hash: string }; Returns: boolean }
+      consume_security_rate_limit: { Args: { p_key_hash: string; p_action: string; p_limit: number; p_window_seconds: number; p_block_seconds: number }; Returns: { allowed: boolean; attempts: number; retry_after_seconds: number; newly_blocked: boolean }[] }
     }
     Enums: {
       [_ in never]: never

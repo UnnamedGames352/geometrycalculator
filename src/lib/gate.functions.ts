@@ -12,12 +12,14 @@ export const checkUnlocked = createServerFn({ method: "GET" }).handler(async () 
 export const redeemCode = createServerFn({ method: "POST" })
   .inputValidator((d: { code: string; deviceId: string; hardware?: unknown }) => ({ ...z.object({ code: z.string().max(200), deviceId: deviceIdSchema }).parse(d), hardware: parseHardware(d.hardware) }))
   .handler(async ({ data }) => {
-    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime } = await import("./gate.server");
+    const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime, consumeSecurityRateLimit } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
     const platformSettings = await getSettings();
     if (platformSettings.lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
     if (platformSettings.emergency_level >= 2) { await logActivity("blocked", `Emergency protocol level ${platformSettings.emergency_level}: new player access restricted`, data.deviceId); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
+    const rateLimit = await consumeSecurityRateLimit("player_signin", data.deviceId, 12, 60, 600);
+    if (!rateLimit.allowed) { await logActivity("rate_limited", `Player sign-in rate limit active for ${rateLimit.retryAfterSeconds} seconds`, data.deviceId); return { ok: false as const }; }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
     const { data: deviceHold, error: deviceHoldError } = await supabaseAdmin.from("player_moderation")
@@ -116,9 +118,11 @@ export const checkAdminAccess = createServerFn({ method: "POST" })
 export const adminLogin = createServerFn({ method: "POST" })
   .inputValidator((d: { password: string; deviceId: string }) => z.object({ password: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
   .handler(async ({ data }) => {
-    const { getGateSession, passwordMatches, enforceChromebook, isDeviceBanned, failedAttempt, logActivity } = await import("./gate.server");
+    const { getGateSession, passwordMatches, enforceChromebook, isDeviceBanned, failedAttempt, logActivity, consumeSecurityRateLimit } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook admin login rejected",data.deviceId,data.password); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted admin login",data.deviceId,data.password); return { ok: false as const }; }
+    const rateLimit = await consumeSecurityRateLimit("admin_login", data.deviceId, 5, 60, 900);
+    if (!rateLimit.allowed) { await logActivity("rate_limited", `Admin sign-in rate limit active for ${rateLimit.retryAfterSeconds} seconds`, data.deviceId); return { ok: false as const }; }
     const expected = process.env["SITE_PASSWORD"];
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
     const session = await getGateSession();
@@ -215,19 +219,37 @@ export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handle
   const { createHash } = await import("node:crypto");
   const hash = session.data.adminSessionToken ? createHash("sha256").update(session.data.adminSessionToken).digest("hex") : "";
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }] = await Promise.all([
+  const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }, { data: alerts, error: alertsError }] = await Promise.all([
     supabaseAdmin.from("admin_security").select("totp_enabled,recovery_code_hashes").eq("id", 1).maybeSingle(),
     supabaseAdmin.from("admin_sessions").select("id,role,device,ip,created_at,last_seen_at,expires_at,revoked_at,session_token_hash").is("revoked_at", null).gt("expires_at", new Date().toISOString()).order("last_seen_at", { ascending: false }).limit(30),
     supabaseAdmin.from("admin_audit_log").select("id,actor_role,action,detail,device,ip,created_at").order("created_at", { ascending: false }).limit(40),
+    supabaseAdmin.from("security_alerts").select("id,severity,category,title,detail,device_id,ip,status,created_at,acknowledged_at,resolved_at").order("created_at", { ascending: false }).limit(50),
   ]);
-  if (settingsError || sessionsError || auditError) throw new Error("Could not load admin security overview");
+  if (settingsError || sessionsError || auditError || alertsError) throw new Error("Could not load admin security overview");
   return {
     twoFactorEnabled: !!settings?.totp_enabled,
     remainingRecoveryCodes: settings?.recovery_code_hashes?.length ?? 0,
     sessions: (sessions ?? []).map(({ session_token_hash, ...row }) => ({ ...row, current: session_token_hash === hash })),
     audit: audit ?? [],
+    alerts: alerts ?? [],
   };
 });
+
+export const updateSecurityAlertStatus = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; status: "acknowledged" | "resolved" }) => z.object({
+    id: z.string().uuid(), status: z.enum(["acknowledged", "resolved"]),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("updateSecurityAlertStatus");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+    const patch = data.status === "acknowledged"
+      ? { status: data.status, acknowledged_at: now }
+      : { status: data.status, acknowledged_at: now, resolved_at: now };
+    const { error } = await supabaseAdmin.from("security_alerts").update(patch).eq("id", data.id);
+    if (error) throw new Error("Could not update security alert.");
+    return { ok: true as const };
+  });
 
 export const revokeAdminSession = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
@@ -542,6 +564,9 @@ export const submitPlayerAppeal = createServerFn({ method: "POST" })
       .select("id,name,device_id").eq("password", data.password.toUpperCase()).maybeSingle();
     if (error) throw new Error("Appeal service is unavailable.");
     if (!friend) throw new Error("We couldn't verify that account. Check the account code and try again.");
+    const { consumeSecurityRateLimit } = await import("./gate.server");
+    const rateLimit = await consumeSecurityRateLimit("appeal_submit", friend.id, 3, 86_400, 86_400);
+    if (!rateLimit.allowed) throw new Error("Too many appeal submissions. Try again later.");
     const { data: existing, error: existingError } = await supabaseAdmin.from("player_appeals")
       .select("id").eq("friend_id", friend.id).eq("status", "pending").limit(1).maybeSingle();
     if (existingError) throw new Error("Appeal service is unavailable.");
