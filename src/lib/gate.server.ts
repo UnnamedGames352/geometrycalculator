@@ -59,6 +59,40 @@ export async function logActivity(kind: string, detail = "", deviceId?: string, 
   const id = deviceId ?? session.data.deviceId;
   const { error } = await supabaseAdmin.from("activity_log").insert({ kind, detail: `${detail} — ${[d.device, d.location, d.ip && `IP ${d.ip}`].filter(Boolean).join(" · ")}`.slice(0,1000), device: d.device, device_id: id && DEVICE_ID_PATTERN.test(id) ? id : null, attempted_input: null });
   if (error) throw new Error("Could not record activity");
+  if (kind === "tripwire") await createSecurityAlert("critical", "tripwire", "Chromebook security tripwire activated", detail, id ?? null);
+}
+
+export async function createSecurityAlert(severity: "low" | "medium" | "high" | "critical", category: string, title: string, detail = "", deviceId?: string | null) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const info = await deviceInfo();
+  const { error } = await supabaseAdmin.from("security_alerts").insert({
+    severity, category: category.slice(0, 80), title: title.slice(0, 160),
+    detail: detail.slice(0, 1000),
+    device_id: deviceId && DEVICE_ID_PATTERN.test(deviceId) ? deviceId : null,
+    ip: info.ip,
+  });
+  if (error) throw new Error("Could not create security alert");
+}
+
+export async function consumeSecurityRateLimit(action: string, subjectId: string, limit: number, windowSeconds: number, blockSeconds: number) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const info = await deviceInfo();
+  const keyHash = createHash("sha256").update(`${action}:${subjectId}:${info.ip ?? "no-ip"}`).digest("hex");
+  const { data, error } = await supabaseAdmin.rpc("consume_security_rate_limit", {
+    p_key_hash: keyHash, p_action: action, p_limit: limit,
+    p_window_seconds: windowSeconds, p_block_seconds: blockSeconds,
+  });
+  if (error) throw new Error("Could not check security rate limit");
+  const result = data?.[0];
+  if (!result) throw new Error("Could not check security rate limit");
+  if (result.newly_blocked) await createSecurityAlert(
+    action === "admin_login" ? "critical" : "high",
+    "rate_limit",
+    action === "admin_login" ? "Administrator sign-in rate limit triggered" : "Player sign-in rate limit triggered",
+    `${action} attempts exceeded the configured limit (${limit} in ${windowSeconds} seconds)`,
+    subjectId,
+  );
+  return { allowed: result.allowed, retryAfterSeconds: result.retry_after_seconds, attempts: result.attempts };
 }
 
 export async function evictUsers(lockdown?: boolean) {
@@ -147,7 +181,10 @@ export async function failedAttempt(kind: "wrong" | "admin_wrong", input: string
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data, error } = await supabaseAdmin.rpc("record_device_failure", { p_device_id: deviceId });
   if (error) throw new Error("Could not record failed attempt");
-  if (data) await logActivity("blocked", "Auto-ban: 3 failed attempts within 5 minutes", deviceId);
+  if (data) {
+    await logActivity("blocked", "Auto-ban: 3 failed attempts within 5 minutes", deviceId);
+    await createSecurityAlert("high", "auto_ban", "Automatic browser ban triggered", "Three failed sign-in attempts were recorded within five minutes.", deviceId);
+  }
 }
 
 export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
@@ -161,6 +198,7 @@ export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof
     pendingAdminAt: locked ? undefined : session.data.pendingAdminAt,
     pendingTotpSecret: locked ? undefined : session.data.pendingTotpSecret,
   });
+  if (locked) await createSecurityAlert("critical", "admin_second_factor", "Administrator second-factor lockout", "Five incorrect authenticator or recovery-code attempts were recorded.", deviceId);
   return locked;
 }
 
