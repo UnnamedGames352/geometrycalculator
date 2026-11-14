@@ -56,6 +56,14 @@ BEGIN
       message = 'EMERGENCY LOCKDOWN — Security violation detected. All sessions have been terminated.',
       current_game = NULL,
       game_started_at = NULL;
+
+  INSERT INTO public.activity_log(kind, detail, device_id, device)
+  VALUES (
+    'tripwire',
+    left('TRIPWIRE CONFIRMED: ' || p_note || '. Device banned; Level 5 enabled; active sessions terminated; emergency message queued.', 1000),
+    p_device_id,
+    left(p_note, 300)
+  );
 END;
 $$;
 REVOKE ALL ON FUNCTION public.tripwire_emergency(uuid, text) FROM PUBLIC, anon, authenticated;
