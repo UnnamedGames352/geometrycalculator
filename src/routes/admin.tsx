@@ -81,6 +81,23 @@ const tabs = [
   { id: "security", label: "Security Center", icon: Shield },
   { id: "activity", label: "Activity audit", icon: Activity },
 ] as const;
+const gameCatalog = [
+  { id: "Brotato", name: "Brotato" }, { id: "Tanuki-Sunset", name: "Tanuki Sunset" },
+  { id: "BurritoBison", name: "Burrito Bison" }, { id: "retro-bowl", name: "Retro Bowl" },
+  { id: "Slope", name: "Slope" }, { id: "Cookie-Clicker", name: "Cookie Clicker" },
+  { id: "BasketRandom", name: "Basket Random" }, { id: "HollowKnight", name: "Hollow Knight" },
+  { id: "LevelDevil", name: "Level Devil" }, { id: "HowToFish", name: "How To Fish" },
+  { id: "polytrack", name: "Polytrack" }, { id: "CrazyCattle3D", name: "Crazy Cattle 3D" },
+  { id: "drift-boss", name: "Drift Boss" }, { id: "SuperLiquidSoccer", name: "Super Liquid Soccer" },
+  { id: "10MinutesTillDawn", name: "10 Minutes Till Dawn" }, { id: "GeometryDash", name: "Geometry Dash" },
+] as const;
+const emergencyLevels = [
+  { level: 0, name: "Level 0 · Normal", description: "Normal operation. Player access is unaffected." },
+  { level: 1, name: "Level 1 · Elevated monitoring", description: "Display an operator notice and keep normal player access enabled." },
+  { level: 2, name: "Level 2 · Restricted access", description: "Block new player sign-ins. Existing sessions can continue." },
+  { level: 3, name: "Level 3 · Site lockdown", description: "Block new sign-ins, enable lockdown, and evict active players." },
+  { level: 4, name: "Level 4 · Full evacuation", description: "Immediately lock the site and evict all active player sessions." },
+] as const;
 type AdminTab = typeof tabs[number]["id"];
 type Friend = ReturnType<typeof Route.useLoaderData>["friends"][number];
 type Editor =
@@ -193,6 +210,8 @@ function Admin() {
     || (activityFilter === "failed" && ["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind))
     || (activityFilter === "success" && ["code", "login", "admin_login"].includes(entry.kind))
     || (activityFilter === "admin" && entry.kind === "admin_login"));
+
+  const maxDailySignIns = Math.max(1, ...(platformAnalytics?.daily.map((day) => day.signIns) ?? [1]));
 
   async function perform(label: string, operation: () => Promise<unknown>) {
     try {
@@ -403,6 +422,34 @@ function Admin() {
       {tab === "access" && <section><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="max-w-xl text-sm text-muted-foreground">One-time codes can only be used once and are refreshed after each redemption.</p></div><div className="flex items-center gap-2"><Input value={codeBatch} onChange={(event) => setCodeBatch(event.target.value)} className="w-20" type="number" min={1} max={25} /><Button onClick={() => void generateCodes()}>Generate codes</Button></div></div>
         <label className="relative mt-5 block max-w-md"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"/><Input value={codeSearch} onChange={(event) => setCodeSearch(event.target.value)} placeholder="Search access codes" className="pl-9" /></label>
         {filteredCodes.length === 0 ? <EmptyState title={codes.length ? "No matching codes" : "No unused codes"} detail={codes.length ? "Try a different search." : "Generate a code when you're ready to invite players."}/> : <ul className="mt-4 grid gap-2 md:grid-cols-2">{filteredCodes.map((code) => <li key={code} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3"><code className="font-mono text-sm tracking-wider">{code}</code><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => copyText(code, "Access code copied")}>Copy</Button><Button variant="ghost" size="icon" aria-label={`Delete code ${code}`} onClick={() => ask("Delete this access code?", "The code will no longer be redeemable.", "Delete code", async () => { await removeCode({ data: { code } }); toast.success("Access code deleted"); await refresh(); })}><X className="h-4 w-4" /></Button></div></li>)}</ul>}
+      </section>}
+
+      {tab === "platform" && <section className="space-y-7">
+        <div className="rounded-xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Emergency protocol</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Choose an operational level. Levels 2–4 affect player access; levels 3–4 also activate lockdown and evict active players.</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${settings.emergency_level >= 3 ? "bg-destructive/10 text-destructive" : settings.emergency_level === 2 ? "bg-chart-3/10 text-chart-3" : "bg-success/10 text-success"}`}>{emergencyLevels.find((item) => item.level === settings.emergency_level)?.name ?? "Unknown level"}</span></div>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <label className="block text-sm font-medium">Protocol level<select className="mt-1 h-11 w-full rounded-md border border-border bg-card px-3" value={emergencyLevel} onChange={(event) => setEmergencyLevel(Number(event.target.value))}>{emergencyLevels.map((item) => <option key={item.level} value={item.level}>{item.name}</option>)}</select><p className="mt-2 text-xs text-muted-foreground">{emergencyLevels.find((item) => item.level === emergencyLevel)?.description}</p></label>
+            <label className="block text-sm font-medium">Player-facing notice <Textarea className="mt-1 min-h-24" maxLength={300} value={emergencyNotice} onChange={(event) => setEmergencyNotice(event.target.value)} placeholder="Optional notice shown in the hub during the protocol…" /><span className="mt-1 block text-xs text-muted-foreground">{emergencyNotice.length}/300 characters</span></label>
+          </div>
+          <div className="mt-4 flex justify-end"><Button variant={emergencyLevel >= 3 ? "destructive" : "default"} onClick={() => {
+            const apply = async () => { await perform("Emergency protocol updated", () => setEmergency({ data: { level: emergencyLevel, notice: emergencyNotice } })); };
+            if (emergencyLevel >= 3 || settings.emergency_level >= 3) ask("Change emergency protocol?", emergencyLevel >= 3 ? "This will activate lockdown and immediately evict active players." : "This will de-escalate the current emergency protocol and may restore player access.", "Confirm protocol change", apply);
+            else void apply();
+          }}>Apply protocol level {emergencyLevel}</Button></div>
+        </div>
+        <div className="rounded-xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Game availability</h2><p className="mt-1 text-sm text-muted-foreground">Hide games from the hub without deleting their deployments. Direct game routes remain protected by the existing access checks.</p></div><span className="rounded-full bg-muted px-3 py-1.5 text-xs">{gameCatalog.length - settings.hidden_games.length} visible · {settings.hidden_games.length} hidden</span></div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{gameCatalog.map((game) => { const hidden = settings.hidden_games.includes(game.id); return <label key={game.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-3 text-sm"><span className="font-medium">{game.name}</span><input type="checkbox" checked={!hidden} onChange={(event) => { const next = event.target.checked ? settings.hidden_games.filter((id) => id !== game.id) : [...settings.hidden_games, game.id]; void perform(`${game.name} visibility updated`, () => save({ data: { hidden_games: next } })); }} aria-label={`Show ${game.name} in hub`} /></label>; })}</div>
+        </div>
+        <div><div className="mb-4"><h2 className="text-lg font-semibold">Platform analytics</h2><p className="mt-1 text-sm text-muted-foreground">Account and activity data currently stored by the hub. Playtime totals are recorded values and may not include an active session until it ends.</p></div>
+          {!platformAnalytics ? <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Loading platform analytics…</p> : <>
+            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4"><StatCard label="Player accounts" value={platformAnalytics.totalPlayers} detail="All created player accounts" accent="text-chart-1" /><StatCard label="Online now" value={platformAnalytics.onlinePlayers} detail="Seen in the last two minutes" accent="text-success" /><StatCard label="Sign-ins · 7 days" value={platformAnalytics.signIns7d} detail="Recorded player login events" accent="text-chart-3" /><StatCard label="Recorded playtime" value={formatDuration(platformAnalytics.totalPlaySeconds)} detail="Across all accounts and games" accent="text-chart-2" /></div>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-border bg-background p-4"><h3 className="font-semibold">Daily sign-ins</h3><div className="mt-4 space-y-3">{platformAnalytics.daily.map((day) => <div key={day.date} className="grid grid-cols-[78px_1fr_28px] items-center gap-2 text-xs"><span className="text-muted-foreground">{new Date(day.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short" })}</span><div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${day.signIns / maxDailySignIns * 100}%` }} /></div><span className="text-right tabular-nums">{day.signIns}</span></div>)}</div></div>
+              <div className="rounded-xl border border-border bg-background p-4"><h3 className="font-semibold">Most played games</h3>{platformAnalytics.games.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No recorded game playtime yet.</p> : <ol className="mt-3 space-y-3">{platformAnalytics.games.map((game, index) => <li key={game.game} className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-0"><span className="text-sm"><span className="mr-2 text-xs text-muted-foreground">{index + 1}.</span>{game.game}</span><strong className="text-sm tabular-nums">{formatDuration(game.seconds)}</strong></li>)}</ol>}</div>
+            </div>
+          </>}
+        </div>
       </section>}
 
       {tab === "security" && <section>
