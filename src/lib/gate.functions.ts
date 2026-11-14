@@ -132,6 +132,7 @@ export const adminLogin = createServerFn({ method: "POST" })
 export const beginAdminTwoFactorSetup = createServerFn({ method: "POST" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
   const session = await getGateSession();
+  if (session.data.pendingStaffId) throw new Error("Staff accounts must use their assigned authenticator.");
   if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000) throw new Error("Admin verification expired. Sign in again.");
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: currentSecurity, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
@@ -149,6 +150,7 @@ export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
     const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
     const session = await getGateSession();
     const secret = session.data.pendingTotpSecret;
+    if (session.data.pendingStaffId) throw new Error("Staff accounts must use their assigned authenticator.");
     if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000 || !secret) throw new Error("Admin verification expired. Sign in again.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: existingSecurity, error: existingError } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
