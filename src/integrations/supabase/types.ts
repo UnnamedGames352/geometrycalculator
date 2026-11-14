@@ -226,15 +226,15 @@ export type Database = {
           emergency_level?: number
           emergency_notice?: string
           emergency_updated_at?: string
-          emergency_level?: number
-          emergency_notice?: string
-          emergency_updated_at?: string
           hidden_games?: string[]
           id?: number
           kick_all_at?: string | null
           lockdown?: boolean
         }
         Update: {
+          emergency_level?: number
+          emergency_notice?: string
+          emergency_updated_at?: string
           hidden_games?: string[]
           id?: number
           kick_all_at?: string | null
