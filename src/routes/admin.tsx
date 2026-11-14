@@ -3,6 +3,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   adminLogin,
+  getAdminSecurityOverview,
+  revokeAdminSession,
   beginAdminTwoFactorSetup,
   confirmAdminTwoFactorSetup,
   verifyAdminTwoFactor,
@@ -100,6 +102,9 @@ function Admin() {
   const make = useServerFn(createCode);
   const removeCode = useServerFn(deleteCode);
   const lock = useServerFn(lockAdmin);
+  const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
+  const revokeSession = useServerFn(revokeAdminSession);
+  const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
   const [tab, setTab] = useState<AdminTab>("dashboard");
@@ -130,6 +135,10 @@ function Admin() {
     const id = setInterval(() => router.invalidate(), 5000);
     return () => clearInterval(id);
   }, [admin, tabOk]);
+  useEffect(() => {
+    if (!admin || !tabOk) return;
+    loadAdminSecurity({}).then(setAdminSecurity).catch(() => setAdminSecurity(null));
+  }, [admin, tabOk, tab]);
 
   if (!accessOk || (admin && tabOk === null)) return null;
   if (!admin || !tabOk) return <AdminGate />;
@@ -385,6 +394,21 @@ function Admin() {
           : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdown: true } }); toast.success("Lockdown enabled"); await refresh(); })}>{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}</Button></div><div className="rounded-xl border border-border p-5"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Evict all active player sessions.</p></div></div><Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button></div></div>
         <div className="mt-8"><div><h3 className="text-lg font-semibold">Banned browser IDs</h3><p className="mt-1 text-sm text-muted-foreground">Browser IDs can be reset and are not hardware identity.</p></div>
           {bans.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No browser IDs are currently banned.</p> : <ul className="mt-4 divide-y divide-border rounded-xl border border-border">{bans.map((item) => <li key={item.device_id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><code className="break-all font-mono text-xs">{item.device_id}</code><p className="mt-1 text-xs text-muted-foreground">{item.note || "No note"} · added {when(item.created_at)}</p></div><Button variant="outline" size="sm" onClick={() => void perform("Browser ID unbanned", () => ban({ data: { deviceId: item.device_id, banned: false } }))}>Unban</Button></li>)}</ul>}
+        </div>
+        <div className="mt-8 space-y-4">
+          <div><h3 className="text-lg font-semibold">Administrator security</h3><p className="mt-1 text-sm text-muted-foreground">Two-factor authentication, active admin sessions, and a protected audit trail.</p></div>
+          {!adminSecurity ? <p className="text-sm text-muted-foreground">Loading administrator security…</p> : <>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background p-4">
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${adminSecurity.twoFactorEnabled ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{adminSecurity.twoFactorEnabled ? "Two-factor enabled" : "Two-factor not enabled"}</span>
+              <span className="text-sm text-muted-foreground">{adminSecurity.remainingRecoveryCodes} recovery codes remaining</span>
+            </div>
+            <div><h4 className="font-semibold">Active administrator sessions</h4>
+              {adminSecurity.sessions.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No active sessions.</p> : <ul className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.sessions.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><p className="font-medium">{item.device || "Unknown device"} {item.current && <span className="ml-2 text-xs text-success">Current session</span>}</p><p className="mt-1 text-xs text-muted-foreground">{item.role} · Last active {when(item.last_seen_at)} · Expires {when(item.expires_at)}</p></div><Button size="sm" variant="outline" disabled={item.current} onClick={() => void perform("Admin session revoked", async () => { await revokeSession({ data: { id: item.id } }); setAdminSecurity(await loadAdminSecurity({})); })}>Revoke</Button></li>)}</ul>}
+            </div>
+            <div><h4 className="font-semibold">Protected admin audit log</h4><p className="mt-1 text-xs text-muted-foreground">Append-only records of authenticator and session security events.</p>
+              {adminSecurity.audit.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No admin security events recorded yet.</p> : <ol className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.audit.map((entry) => <li key={entry.id} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{entry.action.replaceAll("_", " ")}</span><span className="text-xs text-muted-foreground">{when(entry.created_at)}</span></div><p className="mt-1 text-sm text-muted-foreground">{entry.detail}</p></li>)}</ol>}
+            </div>
+          </>}
         </div>
       </section>}
 
