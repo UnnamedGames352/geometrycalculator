@@ -28,6 +28,9 @@ import {
   messageOnlineFriend,
   messageOnlineFriends,
   messageAllFriends,
+  getPlayerManagementData,
+  moderatePlayer,
+  reviewPlayerAppeal,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -41,7 +44,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, KeyRound, LayoutDashboard, LockKeyhole, Search, Shield, Users, X } from "lucide-react";
+import { Activity, Ban, Check, ChevronRight, Copy, Gamepad2, Gavel, KeyRound, LayoutDashboard, LockKeyhole, MessageSquare, Search, Shield, UserRound, Users, X } from "lucide-react";
 import { kickFriend } from "@/lib/kick.functions";
 
 export const Route = createFileRoute("/admin")({
@@ -57,8 +60,8 @@ export const Route = createFileRoute("/admin")({
   loader: async () => {
     const { allowed } = await checkAdminAccessServer();
     if (!allowed) throw redirect({ to: "/geometry" });
-    const [codes, friends, activity, bans] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans()]);
-    return { ...codes, ...friends, ...activity, ...bans };
+    const [codes, friends, activity, bans, management] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans(), getPlayerManagementData()]);
+    return { ...codes, ...friends, ...activity, ...bans, management };
   },
   component: Admin,
 });
@@ -69,6 +72,8 @@ const tabs = [
   { id: "dashboard", label: "Overview", icon: LayoutDashboard },
   { id: "players", label: "Player roster", icon: Gamepad2 },
   { id: "friends", label: "Friend accounts", icon: Users },
+  { id: "moderation", label: "Moderation & appeals", icon: Gavel },
+  { id: "messages", label: "Message history", icon: MessageSquare },
   { id: "access", label: "Access codes", icon: KeyRound },
   { id: "security", label: "Security Center", icon: Shield },
   { id: "activity", label: "Activity audit", icon: Activity },
@@ -84,7 +89,7 @@ type ActivityFilter = "all" | "failed" | "success" | "admin";
 type RosterFilter = "all" | "playing" | "hub" | "offline" | "banned";
 
 function Admin() {
-  const { admin, codes, friends, log, settings, bans } = Route.useLoaderData();
+  const { admin, codes, friends, log, settings, bans, management } = Route.useLoaderData();
   const router = useRouter();
   const ban = useServerFn(setBan);
   const panic = useServerFn(globalPanic);
@@ -104,6 +109,8 @@ function Admin() {
   const lock = useServerFn(lockAdmin);
   const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
   const revokeSession = useServerFn(revokeAdminSession);
+  const moderate = useServerFn(moderatePlayer);
+  const reviewAppeal = useServerFn(reviewPlayerAppeal);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [accessOk, setAccessOk] = useState(false);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
@@ -118,6 +125,8 @@ function Admin() {
   const [rosterFilter, setRosterFilter] = useState<RosterFilter>("all");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [visiblePasswords, setVisiblePasswords] = useState<string[]>([]);
+  const [selectedPlayer, setSelectedPlayer] = useState<Friend | null>(null);
+  const [moderationDraft, setModerationDraft] = useState<{ friend: Friend; duration: "1h" | "24h" | "7d" | "permanent"; reason: string } | null>(null);
 
   useEffect(() => {
     access({ data: { deviceId: getBrowserDeviceId() } }).then((result) => {
@@ -343,7 +352,7 @@ function Admin() {
             if (live && f.current_game) play[f.current_game] = (play[f.current_game] ?? 0) + live;
             const favorite = topGame(play);
             const state = online ? f.current_game ? "Playing" : "On hub" : "Offline";
-            return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-xs text-muted-foreground">{f.password ? "Account active" : "Passwordless"}</p></div></div></td><td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td><td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen ? <InfoChip>{f.screen}</InfoChip> : <InfoChip>Display hidden</InfoChip>}</div></td><td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite: {favorite.game}</p> : <p className="mt-1 text-xs text-muted-foreground">No play stats yet</p>}</td><td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-2"><Button variant="ghost" size="sm" onClick={() => void copyText(f.device_id ?? "", "Browser ID copied")}>Copy</Button><Button variant="outline" size="sm" onClick={() => void banDevice(f.device_id ?? "")}>Ban</Button></div></div> : <span className="text-muted-foreground">No browser ID</span>}</td><td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "No private note"}>{f.admin_note || "No private note"}</button></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2">{online ? <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></> : <span className="text-xs text-muted-foreground">Offline</span>}</div></td></tr>;
+            return <tr key={f.id} className="border-t border-border align-top hover:bg-muted/20"><td className="px-4 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials(f.name)}</span><div><p className="font-semibold">{f.name || "(no name)"}</p><p className="mt-1 text-xs text-muted-foreground">{f.password ? "Account active" : "Passwordless"}</p></div></div></td><td className="px-4 py-4">{f.current_game && online ? <><span className="rounded-full bg-chart-3/10 px-2.5 py-1 text-xs font-medium text-chart-3">{f.current_game}</span><p className="mt-2 text-xs text-muted-foreground">{formatDuration(live)} this session</p></> : <span className="text-muted-foreground">{online ? "Browsing hub" : "No active session"}</span>}<p className="mt-2 text-xs text-muted-foreground">Last seen {when(f.last_seen)}</p></td><td className="px-4 py-4"><div className="flex max-w-[300px] flex-wrap gap-1.5">{f.cpu_cores ? <InfoChip>{f.cpu_cores} cores</InfoChip> : <InfoChip>CPU unavailable</InfoChip>}{f.memory_gb ? <InfoChip>{f.memory_gb} GB RAM</InfoChip> : <InfoChip>RAM unavailable</InfoChip>}{f.screen ? <InfoChip>{f.screen}</InfoChip> : <InfoChip>Display hidden</InfoChip>}</div></td><td className="px-4 py-4"><p className="font-semibold tabular-nums">{formatDuration((f.total_play_seconds ?? 0) + live)}</p>{favorite ? <p className="mt-1 text-xs text-muted-foreground">Favorite: {favorite.game}</p> : <p className="mt-1 text-xs text-muted-foreground">No play stats yet</p>}</td><td className="px-4 py-4">{f.device_id ? <div className="max-w-[240px]"><code className="block break-all rounded bg-muted px-2 py-1 font-mono text-xs">{f.device_id}</code><div className="mt-2 flex gap-2"><Button variant="ghost" size="sm" onClick={() => void copyText(f.device_id ?? "", "Browser ID copied")}>Copy</Button><Button variant="outline" size="sm" onClick={() => void banDevice(f.device_id ?? "")}>Ban</Button></div></div> : <span className="text-muted-foreground">No browser ID</span>}</td><td className="max-w-[220px] px-4 py-4"><button type="button" className="block max-w-full truncate text-left text-sm text-muted-foreground hover:text-foreground" title={f.admin_note || "No private note"}>{f.admin_note || "No private note"}</button></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setSelectedPlayer(f)}>Profile</Button><Button variant="outline" size="sm" onClick={() => setModerationDraft({ friend: f, duration: "24h", reason: "" })}>Suspend</Button>{online && <><Button variant="outline" size="sm" onClick={() => openEditor({ kind: "online-message", friend: f, value: "" })}>Message</Button><Button variant="destructive" size="sm" onClick={() => ask("Kick player?", "This ends the player's current session.", "Kick player", async () => { await kick({ data: { id: f.id } }); toast.success("Player was kicked"); await refresh(); })}>Kick</Button></>}</div></td></tr>;
           })}
         </tbody></table></div>
       </section>}
