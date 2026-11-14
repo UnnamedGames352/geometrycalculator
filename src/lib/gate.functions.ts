@@ -209,7 +209,7 @@ export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handle
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }] = await Promise.all([
     supabaseAdmin.from("admin_security").select("totp_enabled,recovery_code_hashes").eq("id", 1).maybeSingle(),
-    supabaseAdmin.from("admin_sessions").select("id,role,device,ip,created_at,last_seen_at,expires_at,revoked_at,session_token_hash").is("revoked_at", null).order("last_seen_at", { ascending: false }).limit(30),
+    supabaseAdmin.from("admin_sessions").select("id,role,device,ip,created_at,last_seen_at,expires_at,revoked_at,session_token_hash").is("revoked_at", null).gt("expires_at", new Date().toISOString()).order("last_seen_at", { ascending: false }).limit(30),
     supabaseAdmin.from("admin_audit_log").select("id,actor_role,action,detail,device,ip,created_at").order("created_at", { ascending: false }).limit(40),
   ]);
   if (settingsError || sessionsError || auditError) throw new Error("Could not load admin security overview");
