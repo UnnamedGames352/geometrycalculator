@@ -90,13 +90,31 @@ export const checkAdminSession = createServerFn({ method: "GET" }).handler(async
 });
 
 export const adminLogin = createServerFn({ method: "POST" })
-  .inputValidator((d: { password: string; deviceId: string }) => z.object({ password: z.string().max(200), deviceId: deviceIdSchema }).parse(d))
+  .inputValidator((d: { password: string; deviceId: string; username?: string }) => z.object({ password: z.string().min(1).max(200), deviceId: deviceIdSchema, username: z.string().trim().min(3).max(32).optional() }).parse(d))
   .handler(async ({ data }) => {
     const { getGateSession, passwordMatches, failedAttempt, logActivity } = await import("./gate.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (data.username) {
+      const { data: staff, error } = await supabaseAdmin.from("admin_staff").select("id,username,password_hash,role,totp_enabled,disabled").ilike("username", data.username).maybeSingle();
+      const { verifyStaffPassword } = await import("./admin-security");
+      if (error) throw new Error("Could not check staff account");
+      if (!staff || staff.disabled || !staff.totp_enabled || !verifyStaffPassword(data.password, staff.password_hash)) {
+        await failedAttempt("admin_wrong", data.password, data.deviceId);
+        return { ok: false as const };
+      }
+      const session = await getGateSession();
+      if (session.data.adminSessionToken) {
+        const { createHash } = await import("node:crypto");
+        const oldHash = createHash("sha256").update(session.data.adminSessionToken).digest("hex");
+        await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", oldHash).is("revoked_at", null);
+      }
+      await session.update({ ...session.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAt: Date.now(), pendingAdminAttempts: 0, pendingTotpSecret: undefined, pendingStaffId: staff.id, deviceId: data.deviceId, at: Date.now() });
+      await logActivity("staff_password_verified", `Staff password verified for ${staff.username}; second factor required`, data.deviceId);
+      return { ok: false as const, requiresTwoFactor: true as const };
+    }
     const expected = process.env["SITE_PASSWORD"];
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
     const session = await getGateSession();
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     if (session.data.adminSessionToken) {
       const { createHash } = await import("node:crypto");
       const oldHash = createHash("sha256").update(session.data.adminSessionToken).digest("hex");
@@ -160,25 +178,34 @@ export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
     const session = await getGateSession();
     if (!session.data.pendingAdminAuth || !session.data.deviceId || !session.data.pendingAdminAt || Date.now() - session.data.pendingAdminAt > 5 * 60_000) return { ok: false as const };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled,totp_secret_ciphertext").eq("id", 1).maybeSingle();
-    if (error || !security?.totp_enabled || !security.totp_secret_ciphertext) return { ok: false as const };
     const sessionSecret = process.env["SESSION_SECRET"];
     if (!sessionSecret) throw new Error("Session encryption is unavailable.");
     const { decryptTotpSecret, verifyTotp, hashRecoveryCode } = await import("./admin-security");
     let accepted = false;
-    try { accepted = verifyTotp(decryptTotpSecret(security.totp_secret_ciphertext, sessionSecret), data.code); } catch { accepted = false; }
-    if (!accepted) {
-      const { data: consumed, error: consumeError } = await supabaseAdmin.rpc("consume_admin_recovery_code", { p_code_hash: hashRecoveryCode(data.code) });
-      if (consumeError) throw new Error("Could not verify recovery code");
-      accepted = !!consumed;
+    let staffRole: "admin" | "moderator" | "support" | undefined;
+    const staffId = session.data.pendingStaffId;
+    if (staffId) {
+      const { data: staff, error } = await supabaseAdmin.from("admin_staff").select("role,totp_secret_ciphertext,totp_enabled,disabled").eq("id", staffId).maybeSingle();
+      if (error || !staff || staff.disabled || !staff.totp_enabled || !staff.totp_secret_ciphertext) return { ok: false as const };
+      try { accepted = verifyTotp(decryptTotpSecret(staff.totp_secret_ciphertext, sessionSecret), data.code); } catch { accepted = false; }
+      staffRole = staff.role as "admin" | "moderator" | "support";
+    } else {
+      const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled,totp_secret_ciphertext").eq("id", 1).maybeSingle();
+      if (error || !security?.totp_enabled || !security.totp_secret_ciphertext) return { ok: false as const };
+      try { accepted = verifyTotp(decryptTotpSecret(security.totp_secret_ciphertext, sessionSecret), data.code); } catch { accepted = false; }
+      if (!accepted) {
+        const { data: consumed, error: consumeError } = await supabaseAdmin.rpc("consume_admin_recovery_code", { p_code_hash: hashRecoveryCode(data.code) });
+        if (consumeError) throw new Error("Could not verify recovery code");
+        accepted = !!consumed;
+      }
     }
     if (!accepted) {
       const { failedAdminSecondFactor } = await import("./gate.server");
       await failedAdminSecondFactor(session, session.data.deviceId);
       return { ok: false as const };
     }
-    await startAdminSession(session, session.data.deviceId);
-    await recordAdminAudit("admin_two_factor_login", "Administrator completed two-factor authentication");
+    await startAdminSession(session, session.data.deviceId, staffRole ?? "owner", staffId);
+    await recordAdminAudit(staffId ? "staff_two_factor_login" : "admin_two_factor_login", staffId ? "Staff member completed two-factor authentication" : "Administrator completed two-factor authentication");
     return { ok: true as const };
   });
 
