@@ -156,7 +156,6 @@ export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
     const sessionSecret = process.env["SESSION_SECRET"];
     if (!sessionSecret) throw new Error("Session encryption is unavailable.");
     const recoveryCodes = generateRecoveryCodes();
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("admin_security").upsert({
       id: 1, totp_secret_ciphertext: encryptTotpSecret(secret, sessionSecret),
       totp_enabled: true, recovery_code_hashes: recoveryCodes.map(hashRecoveryCode), updated_at: new Date().toISOString(),
