@@ -88,7 +88,7 @@ export async function consumeSecurityRateLimit(action: string, subjectId: string
   if (result.newly_blocked) await createSecurityAlert(
     action === "admin_login" ? "critical" : "high",
     "rate_limit",
-    action === "admin_login" ? "Administrator sign-in rate limit triggered" : "Player sign-in rate limit triggered",
+    action === "admin_login" ? "Administrator sign-in rate limit triggered" : action === "appeal_submit" ? "Player appeal rate limit triggered" : "Player sign-in rate limit triggered",
     `${action} attempts exceeded the configured limit (${limit} in ${windowSeconds} seconds)`,
     subjectId,
   );
