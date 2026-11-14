@@ -53,14 +53,14 @@ export const redeemCode = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-type Friend = { device_id: string | null; id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null; browser_version: string | null; screen: string | null; cpu_cores: number | null; memory_gb: number | null; total_play_seconds: number; play_seconds: Record<string, number>; admin_note: string };
+type Friend = { created_at: string; device_id: string | null; id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null; browser_version: string | null; screen: string | null; cpu_cores: number | null; memory_gb: number | null; total_play_seconds: number; play_seconds: Record<string, number>; admin_note: string };
 
 export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession } = await import("./gate.server");
   if (!(await (await import("./gate.server")).isAdmin())) return { friends: [] as Friend[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
-  return { friends: (data ?? []).map((f): Friend => ({ device_id: f.device_id, id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message, browser_version: f.browser_version, screen: f.screen, cpu_cores: f.cpu_cores, memory_gb: f.memory_gb, total_play_seconds: f.total_play_seconds, play_seconds: addPlaytime(f.play_seconds, null, 0), admin_note: f.admin_note })) };
+  return { friends: (data ?? []).map((f): Friend => ({ created_at: f.created_at, device_id: f.device_id, id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message, browser_version: f.browser_version, screen: f.screen, cpu_cores: f.cpu_cores, memory_gb: f.memory_gb, total_play_seconds: f.total_play_seconds, play_seconds: addPlaytime(f.play_seconds, null, 0), admin_note: f.admin_note })) };
 });
 
 export const createFriend = createServerFn({ method: "POST" })
