@@ -459,6 +459,96 @@ export const messageAllFriends = createServerFn({ method: "POST" })
     return { ok: true as const, sent: rows?.length ?? 0 };
   });
 
+export const submitPlayerAppeal = createServerFn({ method: "POST" })
+  .inputValidator((d: { password: string; reason: string }) => z.object({
+    password: z.string().trim().min(4).max(80),
+    reason: z.string().trim().min(20).max(1000),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: friend, error } = await supabaseAdmin.from("friend_passwords")
+      .select("id,name,device_id").eq("password", data.password.toUpperCase()).maybeSingle();
+    if (error) throw new Error("Appeal service is unavailable.");
+    if (!friend) throw new Error("We couldn't verify that account. Check the account code and try again.");
+    const { data: existing, error: existingError } = await supabaseAdmin.from("player_appeals")
+      .select("id").eq("friend_id", friend.id).eq("status", "pending").limit(1).maybeSingle();
+    if (existingError) throw new Error("Appeal service is unavailable.");
+    if (existing) throw new Error("You already have an appeal waiting for review.");
+    const { error: insertError } = await supabaseAdmin.from("player_appeals").insert({
+      friend_id: friend.id, device_id: friend.device_id, player_name: friend.name, reason: data.reason,
+    });
+    if (insertError) throw new Error("Could not submit your appeal.");
+    return { ok: true as const };
+  });
+
+export const moderatePlayer = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; duration: "1h" | "24h" | "7d" | "permanent"; reason: string }) => z.object({
+    id: z.string().uuid(),
+    duration: z.enum(["1h", "24h", "7d", "permanent"]),
+    reason: z.string().trim().min(5).max(500),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("moderatePlayer", "moderator");
+    const { getGateSession, logActivity } = await import("./gate.server");
+    const session = await getGateSession();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: player, error: playerError } = await supabaseAdmin.from("friend_passwords")
+      .select("id,name,device_id").eq("id", data.id).maybeSingle();
+    if (playerError || !player) throw new Error("Player account not found.");
+    const expiresAt = data.duration === "permanent" ? null : new Date(Date.now() + ({
+      "1h": 60 * 60_000, "24h": 24 * 60 * 60_000, "7d": 7 * 24 * 60 * 60_000,
+    }[data.duration])).toISOString();
+    const { error } = await supabaseAdmin.from("player_moderation").insert({
+      friend_id: player.id, device_id: player.device_id, reason: data.reason,
+      expires_at: expiresAt, actor_role: session.data.adminRole ?? "owner",
+    });
+    if (error) throw new Error("Could not apply player suspension.");
+    await supabaseAdmin.from("friend_passwords").update({ active_session: null }).eq("id", player.id);
+    await logActivity("player_moderation", `${player.name} suspended (${data.duration})`, player.device_id ?? undefined);
+    return { ok: true as const, expiresAt };
+  });
+
+export const reviewPlayerAppeal = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; decision: "approved" | "denied"; response?: string }) => z.object({
+    id: z.string().uuid(), decision: z.enum(["approved", "denied"]),
+    response: z.string().trim().max(500).optional(),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("reviewPlayerAppeal", "moderator");
+    const { getGateSession, logActivity } = await import("./gate.server");
+    const session = await getGateSession();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: appeal, error: appealError } = await supabaseAdmin.from("player_appeals")
+      .select("id,friend_id,device_id,player_name,status").eq("id", data.id).maybeSingle();
+    if (appealError || !appeal || appeal.status !== "pending") throw new Error("This appeal is no longer pending.");
+    const { error } = await supabaseAdmin.from("player_appeals").update({
+      status: data.decision, admin_response: data.response || null,
+      reviewed_at: new Date().toISOString(), reviewed_by: session.data.adminRole ?? "owner",
+    }).eq("id", data.id).eq("status", "pending");
+    if (error) throw new Error("Could not update the appeal.");
+    if (data.decision === "approved") {
+      let query = supabaseAdmin.from("player_moderation").update({ lifted_at: new Date().toISOString() }).is("lifted_at", null);
+      if (appeal.friend_id && appeal.device_id) query = query.or(`friend_id.eq.${appeal.friend_id},device_id.eq.${appeal.device_id}`);
+      else if (appeal.friend_id) query = query.eq("friend_id", appeal.friend_id);
+      else if (appeal.device_id) query = query.eq("device_id", appeal.device_id);
+      await query;
+    }
+    await logActivity("player_appeal", `${appeal.player_name} appeal ${data.decision}`, appeal.device_id ?? undefined);
+    return { ok: true as const };
+  });
+
+export const getPlayerManagementData = createServerFn({ method: "GET" }).handler(async () => {
+  if (!(await (await import("./gate.server")).isAdmin())) return { moderation: [], appeals: [], messages: [] };
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const [{ data: moderation, error: moderationError }, { data: appeals, error: appealsError }, { data: messages, error: messagesError }] = await Promise.all([
+    supabaseAdmin.from("player_moderation").select("id,friend_id,device_id,reason,expires_at,lifted_at,actor_role,created_at").order("created_at", { ascending: false }).limit(100),
+    supabaseAdmin.from("player_appeals").select("id,friend_id,device_id,player_name,reason,status,admin_response,created_at,reviewed_at,reviewed_by").order("created_at", { ascending: false }).limit(100),
+    supabaseAdmin.from("player_message_history").select("id,target_type,target_id,target_label,message,recipient_count,actor_role,created_at").order("created_at", { ascending: false }).limit(100),
+  ]);
+  if (moderationError || appealsError || messagesError) throw new Error("Could not load player management records.");
+  return { moderation: moderation ?? [], appeals: appeals ?? [], messages: messages ?? [] };
+});
+
 export const getGeometryTripwireNotice = createServerFn({ method: "GET" }).handler(async () => {
   const { takeTripwireNotice } = await import("./gate.server");
   return { message: await takeTripwireNotice() };
