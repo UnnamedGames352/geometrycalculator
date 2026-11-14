@@ -50,6 +50,13 @@
       "when": 1794336546922,
       "tag": "0006_friend_roster_details",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0008_redact_activity_inputs",
+      "breakpoints": true
     }
   ]
 }

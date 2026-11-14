@@ -65,7 +65,7 @@ const tabs = [
   { id: "players", label: "Player roster", icon: Gamepad2 },
   { id: "friends", label: "Friend accounts", icon: Users },
   { id: "access", label: "Access codes", icon: KeyRound },
-  { id: "security", label: "Security & bans", icon: Shield },
+  { id: "security", label: "Security Center", icon: Shield },
   { id: "activity", label: "Activity audit", icon: Activity },
 ] as const;
 type AdminTab = typeof tabs[number]["id"];
@@ -147,6 +147,11 @@ function Admin() {
     return matchesText && matchesState;
   });
   const filteredCodes = codes.filter((code) => code.toLowerCase().includes(codeSearch.toLowerCase().trim()));
+  const failedSignIns = log.filter((entry) => ["wrong", "admin_wrong"].includes(entry.kind)).length;
+  const blockedEvents = log.filter((entry) => ["blocked", "tripwire"].includes(entry.kind)).length;
+  const tripwireEvents = log.filter((entry) => entry.kind === "tripwire").length;
+  const adminSignIns = log.filter((entry) => entry.kind === "admin_login").length;
+  const recentSecurityEvents = log.filter((entry) => ["wrong", "admin_wrong", "blocked", "tripwire", "ban", "admin_login", "admin_panic", "admin_lockdown"].includes(entry.kind)).slice(0, 8);
   const filteredLog = log.filter((entry) => activityFilter === "all"
     || (activityFilter === "failed" && ["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind))
     || (activityFilter === "success" && ["code", "login", "admin_login"].includes(entry.kind))
@@ -350,7 +355,29 @@ function Admin() {
         {filteredCodes.length === 0 ? <EmptyState title={codes.length ? "No matching codes" : "No unused codes"} detail={codes.length ? "Try a different search." : "Generate a code when you're ready to invite players."}/> : <ul className="mt-4 grid gap-2 md:grid-cols-2">{filteredCodes.map((code) => <li key={code} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3"><code className="font-mono text-sm tracking-wider">{code}</code><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => copyText(code, "Access code copied")}>Copy</Button><Button variant="ghost" size="icon" aria-label={`Delete code ${code}`} onClick={() => ask("Delete this access code?", "The code will no longer be redeemable.", "Delete code", async () => { await removeCode({ data: { code } }); toast.success("Access code deleted"); await refresh(); })}><X className="h-4 w-4" /></Button></div></li>)}</ul>}
       </section>}
 
-      {tab === "security" && <section><div className="grid gap-3 lg:grid-cols-2"><div className={`rounded-xl border p-5 ${settings.lockdown ? "border-destructive/40 bg-destructive/5" : "border-border bg-background"}`}><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><LockKeyhole className="h-5 w-5" /></span><div><h3 className="font-semibold">Lockdown</h3><p className="text-sm text-muted-foreground">Block access to the games hub and redirect players back to Geometry.</p></div></div><Button variant={settings.lockdown ? "outline" : "secondary"} className="mt-4" onClick={() => settings.lockdown
+      {tab === "security" && <section>
+        <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Failed sign-ins" value={failedSignIns} detail="Wrong passwords or access codes in the retained audit window" accent="text-destructive" />
+          <StatCard label="Blocked events" value={blockedEvents} detail="Rejected access and security blocks" accent="text-chart-3" />
+          <StatCard label="Tripwire activations" value={tripwireEvents} detail="Non-Chromebook security events" accent="text-destructive" />
+          <StatCard label="Admin sign-ins" value={adminSignIns} detail="Successful admin authentication events" accent="text-success" />
+        </div>
+        <div className="mb-6 rounded-xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h3 className="font-semibold">Security posture</h3><p className="mt-1 text-sm text-muted-foreground">Live status based on the controls and audit events currently available to this dashboard.</p></div>
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${settings.lockdown ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}>{settings.lockdown ? "Lockdown active" : "Access controls active"}</span>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <InfoChip>Chromebook tripwire enabled</InfoChip>
+            <InfoChip>Failed-attempt auto-ban enabled</InfoChip>
+            <InfoChip>{bans.length} banned browser IDs</InfoChip>
+          </div>
+        </div>
+        <div className="mb-6">
+          <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Recent security events</h3><p className="mt-1 text-sm text-muted-foreground">Latest authentication, blocking, tripwire, and admin events.</p></div><Button variant="outline" size="sm" onClick={() => setTab("activity")}>Open full audit</Button></div>
+          {recentSecurityEvents.length === 0 ? <EmptyState title="No recent security events" detail="New security events will appear here as they happen." /> : <ol className="mt-3 divide-y divide-border rounded-xl border border-border bg-background">{recentSecurityEvents.map((entry) => <li key={`${entry.id}-security`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.created_at)}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind) ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{entry.kind}</span></li>)}</ol>}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2"><div className={`rounded-xl border p-5 ${settings.lockdown ? "border-destructive/40 bg-destructive/5" : "border-border bg-background"}`}><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><LockKeyhole className="h-5 w-5" /></span><div><h3 className="font-semibold">Lockdown</h3><p className="text-sm text-muted-foreground">Block access to the games hub and redirect players back to Geometry.</p></div></div><Button variant={settings.lockdown ? "outline" : "secondary"} className="mt-4" onClick={() => settings.lockdown
           ? void perform("Lockdown disabled", () => save({ data: { lockdown: false } }))
           : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdown: true } }); toast.success("Lockdown enabled"); await refresh(); })}>{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}</Button></div><div className="rounded-xl border border-border p-5"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Evict all active player sessions.</p></div></div><Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button></div></div>
         <div className="mt-8"><div><h3 className="text-lg font-semibold">Banned browser IDs</h3><p className="mt-1 text-sm text-muted-foreground">Browser IDs can be reset and are not hardware identity.</p></div>
@@ -360,7 +387,7 @@ function Admin() {
 
       {tab === "activity" && <section><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm text-muted-foreground">Recent security and sign-in events. Attempted inputs are kept for audit only.</p></div><Button variant="outline" size="sm" onClick={() => void perform("Activity log cleared", () => clearLog({}))}>Clear log</Button></div>
         <div className="mt-4 flex flex-wrap gap-1.5">{(["all", "failed", "success", "admin"] as const).map((filter) => <FilterPill key={filter} active={activityFilter === filter} onClick={() => setActivityFilter(filter)}>{filter === "all" ? "All" : filter === "failed" ? "Failed" : filter === "success" ? "Success" : "Admin"}</FilterPill>)}</div>
-        {filteredLog.length === 0 ? <EmptyState title="No activity in this view" detail="New activity will appear here as it happens."/> : <ol className="mt-4 divide-y divide-border rounded-xl border border-border bg-background">{filteredLog.map((entry) => <li key={`${entry.id}-${entry.created_at}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.created_at)}</p>{entry.attempted_input && <code className="mt-2 block break-all rounded bg-muted px-2 py-1 font-mono text-[11px]">{entry.attempted_input}</code>}</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${entry.kind.includes("wrong") || entry.kind === "blocked" || entry.kind === "tripwire" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{entry.kind}</span></li>)}</ol>}
+        {filteredLog.length === 0 ? <EmptyState title="No activity in this view" detail="New activity will appear here as it happens."/> : <ol className="mt-4 divide-y divide-border rounded-xl border border-border bg-background">{filteredLog.map((entry) => <li key={`${entry.id}-${entry.created_at}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.created_at)}</p>{entry.attempted_input && <p className="mt-2 text-xs text-muted-foreground">Submitted input redacted for security.</p>}</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${entry.kind.includes("wrong") || entry.kind === "blocked" || entry.kind === "tripwire" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{entry.kind}</span></li>)}</ol>}
       </section>}
     </section>
 

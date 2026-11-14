@@ -1,7 +1,7 @@
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { checkUnlocked, lockGate, redeemCode } from "@/lib/gate.functions";
+import { checkAdminSession, checkUnlocked, lockGate, redeemCode } from "@/lib/gate.functions";
 import { getBrowserDeviceId, getHardwareSnapshot } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
 
@@ -16,6 +16,8 @@ export const Route = createFileRoute("/")({
     { name: "robots", content: "noindex" },
   ] }),
   loader: async () => {
+    const adminState = await checkAdminSession();
+    if (adminState.admin) throw redirect({ to: "/admin" });
     const state = await checkUnlocked();
     if (state.lockdown) throw redirect({ to: "/geometry" });
     return state;
