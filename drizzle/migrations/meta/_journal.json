@@ -78,6 +78,13 @@
       "when": 1794800000000,
       "tag": "0010_reassert_ban_lockdown_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0011_atomic_admin_recovery_codes",
+      "breakpoints": true
     }
   ]
 }
