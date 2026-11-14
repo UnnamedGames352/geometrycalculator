@@ -33,13 +33,22 @@ const config = () => {
 
 export const getGateSession = () => useSession<GateSession>(config());
 
-export type SiteSettings = { lockdown: boolean; hidden_games: string[]; kick_all_at: string | null };
+export type SiteSettings = {
+  lockdown: boolean;
+  hidden_games: string[];
+  kick_all_at: string | null;
+  emergency_level: number;
+  emergency_notice: string;
+  emergency_updated_at: string;
+};
 
 export async function getSettings(): Promise<SiteSettings> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.from("site_settings").select("lockdown, hidden_games, kick_all_at").eq("id", 1).maybeSingle();
+  const { data, error } = await supabaseAdmin.from("site_settings")
+    .select("lockdown, hidden_games, kick_all_at, emergency_level, emergency_notice, emergency_updated_at")
+    .eq("id", 1).maybeSingle();
   if (error) throw new Error("Could not check site settings");
-  return data ?? { lockdown: false, hidden_games: [], kick_all_at: null };
+  return data ?? { lockdown: false, hidden_games: [], kick_all_at: null, emergency_level: 0, emergency_notice: "", emergency_updated_at: new Date(0).toISOString() };
 }
 
 // Every activity entry includes the browser ID when one has been assigned, so an

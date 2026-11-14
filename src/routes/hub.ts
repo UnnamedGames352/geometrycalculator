@@ -5,14 +5,20 @@ export const Route = createFileRoute("/hub")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const { isUnlocked, takeMessage, setCurrentGame, guardScript, getTripwireBroadcast } = await import("@/lib/gate.server");
+        const { isUnlocked, takeMessage, setCurrentGame, guardScript, getTripwireBroadcast, getSettings } = await import("@/lib/gate.server");
         const unlocked = await isUnlocked({ markSeen: true });
         const url = new URL(request.url);
 
         if (url.searchParams.get("session-check") === "1") {
           const broadcast = await getTripwireBroadcast();
+          const settings = await getSettings();
           const message = unlocked ? await takeMessage(url.searchParams.get("ack") === "1") : null;
-          return Response.json({ unlocked: unlocked && !broadcast, message, broadcast }, {
+          return Response.json({
+            unlocked: unlocked && !broadcast, message, broadcast,
+            hiddenGames: settings.hidden_games,
+            emergencyLevel: settings.emergency_level,
+            emergencyNotice: settings.emergency_notice,
+          }, {
             headers: { "cache-control": "no-store, no-cache, must-revalidate" },
           });
         }

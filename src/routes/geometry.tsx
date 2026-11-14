@@ -153,7 +153,16 @@ const problemSteps = [
 function Geometry() {
   const { tripwireNotice } = Route.useLoaderData();
   const [notice, setNotice] = useState<string | null>(tripwireNotice);
+  const [emergencyNotice, setEmergencyNotice] = useState("");
   const [shape, setShape] = useState<Shape>("circle");
+
+  useEffect(() => {
+    const carried = sessionStorage.getItem("gate-emergency-evacuation");
+    if (carried) {
+      setEmergencyNotice(carried);
+      sessionStorage.removeItem("gate-emergency-evacuation");
+    }
+  }, []);
 
   useEffect(() => {
     const carried = sessionStorage.getItem("gate-tripwire-notice");
@@ -181,6 +190,7 @@ function Geometry() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
+      {emergencyNotice && <div role="status" aria-live="polite" className="fixed left-1/2 top-4 z-[100] flex w-[min(92vw,620px)] -translate-x-1/2 items-start justify-between gap-4 rounded-xl border border-chart-3/30 bg-card px-4 py-3 text-card-foreground shadow-xl"><div><p className="font-semibold">Platform emergency notice</p><p className="mt-1 text-sm text-muted-foreground">{emergencyNotice}</p></div><button type="button" onClick={() => setEmergencyNotice("")} aria-label="Dismiss emergency notice" className="rounded p-1 text-muted-foreground hover:bg-muted">×</button></div>}
       {notice && <div role="status" aria-live="polite" className="fixed left-1/2 top-4 z-[100] flex w-[min(92vw,620px)] -translate-x-1/2 items-start justify-between gap-4 rounded-xl border border-destructive/30 bg-card px-4 py-3 text-card-foreground shadow-xl">
         <div>
           <p className="font-semibold">Access ended — Chromebook security check</p>
