@@ -16,6 +16,7 @@ type GateSession = {
   adminSessionToken?: string | undefined;
   adminRole?: 'owner' | 'admin' | 'moderator' | 'support' | undefined;
   pendingAdminAuth?: boolean | undefined;
+  pendingAdminAt?: number | undefined;
   pendingAdminAttempts?: number | undefined;
   pendingTotpSecret?: string | undefined;
 };
@@ -167,7 +168,7 @@ export async function startAdminSession(session: Awaited<ReturnType<typeof getGa
   if (error) throw new Error("Could not create admin session");
   await session.update({
     ...session.data, unlocked: true, admin: true, adminSessionToken: token,
-    adminRole: "owner", pendingAdminAuth: false, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
+    adminRole: "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
     deviceId, at: Date.now(), friendId: undefined, token: undefined,
   });
   await recordAdminAudit("admin_session_created", "Administrator session created");
