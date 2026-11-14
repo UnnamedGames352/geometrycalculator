@@ -240,6 +240,7 @@ export type Database = {
     Functions: {
       evict_gate_users: { Args: { p_lockdown?: boolean }; Returns: undefined }
       record_device_failure: { Args: { p_device_id: string }; Returns: boolean }
+      consume_admin_recovery_code: { Args: { p_code_hash: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
