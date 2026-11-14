@@ -203,7 +203,7 @@ export async function isAdmin() {
   const invalidateSession = async () => {
     await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() })
       .eq("session_token_hash", hash).is("revoked_at", null);
-    await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
+    await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
   };
   if (!(await enforceChromebook(deviceId)) || await isDeviceBanned(deviceId)) {
     await invalidateSession();
