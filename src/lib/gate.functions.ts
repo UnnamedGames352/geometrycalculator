@@ -117,7 +117,7 @@ export const adminLogin = createServerFn({ method: "POST" })
     }
     const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
     if (error) throw new Error("Could not check administrator security settings");
-    await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
+    await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingAdminAttempts: 0, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
     await logActivity("admin_password_verified", "Admin password verified; second factor required", data.deviceId);
     return security?.totp_enabled ? { ok: false as const, requiresTwoFactor: true as const } : { ok: false as const, requiresSetup: true as const };
   });
@@ -149,8 +149,8 @@ export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
     if (existingSecurity?.totp_enabled) throw new Error("Two-factor authentication is already enabled.");
     const { verifyTotp, encryptTotpSecret, generateRecoveryCodes, hashRecoveryCode } = await import("./admin-security");
     if (!verifyTotp(secret, data.code)) {
-      const { failedAttempt } = await import("./gate.server");
-      await failedAttempt("admin_wrong", data.code, session.data.deviceId);
+      const { failedAdminSecondFactor } = await import("./gate.server");
+      await failedAdminSecondFactor(session, session.data.deviceId);
       return { ok: false as const, error: "That authenticator code is not valid." };
     }
     const sessionSecret = process.env["SESSION_SECRET"];
