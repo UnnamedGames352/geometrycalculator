@@ -184,13 +184,14 @@ export async function isAdmin() {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const hash = createHash("sha256").update(s.data.adminSessionToken).digest("hex");
   const { data, error } = await supabaseAdmin.from("admin_sessions")
-    .select("id,expires_at,revoked_at,last_seen_at")
+    .select("id,role,expires_at,revoked_at,last_seen_at")
     .eq("session_token_hash", hash).maybeSingle();
   if (error) throw new Error("Could not validate admin session");
   if (!data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) {
     await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
     return false;
   }
+  if (s.data.adminRole !== data.role) await s.update({ ...s.data, adminRole: data.role as GateSession["adminRole"] });
   if (Date.now() - Date.parse(data.last_seen_at) > 60_000) {
     await supabaseAdmin.from("admin_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
   }
