@@ -5,7 +5,8 @@ const deviceIdSchema = z.string().regex(DEVICE_ID_PATTERN);
 
 export const checkUnlocked = createServerFn({ method: "GET" }).handler(async () => {
   const { isUnlocked, getSettings } = await import("./gate.server");
-  return { unlocked: await isUnlocked(), lockdown: (await getSettings()).lockdown };
+  const settings = await getSettings();
+  return { unlocked: await isUnlocked(), lockdown: settings.lockdown, lockdownLevel: settings.lockdown_level };
 });
 
 // Visitors enter a single-use code; it is deleted the moment it's used.
@@ -14,7 +15,7 @@ export const redeemCode = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
-    if ((await getSettings()).lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
+    if ((await getSettings()).lockdown_level >= 2) { await logActivity("blocked", "Lockdown level blocks new sign-ins", data.deviceId, data.code); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
     const code = data.code.trim().toUpperCase();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -321,7 +322,7 @@ export const updateFriend = createServerFn({ method: "POST" })
 
 export const getActivity = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession, getSettings } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null } };
+  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, lockdown_level: 0, hidden_games: [] as string[], kick_all_at: null as string | null, broadcast_message: null as string | null } };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("activity_log").select("id, at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
   return { log: data ?? [], settings: await getSettings() };
@@ -335,28 +336,37 @@ export const clearActivity = createServerFn({ method: "POST" }).handler(async ()
 });
 
 export const saveSettings = createServerFn({ method: "POST" })
-  .inputValidator((d: { lockdown?: boolean; hidden_games?: string[]; kickAll?: boolean }) => ({
+  .inputValidator((d: { lockdown?: boolean; lockdownLevel?: number; hidden_games?: string[]; kickAll?: boolean }) => ({
     lockdown: d?.lockdown === undefined ? undefined : !!d.lockdown,
+    lockdownLevel: d?.lockdownLevel === undefined ? undefined : Math.max(0, Math.min(5, Math.trunc(Number(d.lockdownLevel)))),
     hidden_games: Array.isArray(d?.hidden_games) ? d.hidden_games.map(String).filter((g) => /^[\w.-]+$/.test(g)).slice(0, 50) : undefined,
     kickAll: !!d?.kickAll,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin("saveSettings");
-    const { getSettings } = await import("./gate.server");
+    await requireAdmin("saveSettings", data.lockdownLevel === 5 ? "owner" : "admin");
+    const { getSettings, evictUsers, logActivity } = await import("./gate.server");
     const cur = await getSettings();
+    const level = data.lockdownLevel ?? (data.lockdown === undefined ? cur.lockdown_level : data.lockdown ? 5 : 0);
+    const lockdown = level >= 3;
+    const now = new Date().toISOString();
     const next = {
       id: 1,
-      lockdown: data.lockdown ?? cur.lockdown,
+      lockdown,
+      lockdown_level: level,
       hidden_games: data.hidden_games ?? cur.hidden_games,
-      kick_all_at: data.kickAll || data.lockdown === true ? new Date().toISOString() : cur.kick_all_at,
+      kick_all_at: data.kickAll || level >= 4 ? now : cur.kick_all_at,
+      broadcast_message: level === 5 ? "EMERGENCY LOCKDOWN — Site security controls have activated Level 5. All sessions have been terminated." : level === 0 ? null : cur.broadcast_message,
     };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("site_settings").upsert(next);
     if (error) throw new Error("Could not save settings");
-    if (data.kickAll || data.lockdown === true) await (await import("./gate.server")).evictUsers(data.lockdown);
-    if (data.lockdown === true && !cur.lockdown) await (await import("./gate.server")).logActivity("admin_lockdown", "Admin enabled site lockdown");
-    if (data.kickAll) await (await import("./gate.server")).logActivity("admin_panic", "Admin cleared all player sessions");
-    return { ok: true };
+    if (data.kickAll || level >= 4) await evictUsers(lockdown);
+    if (level === 5) {
+      await supabaseAdmin.from("friend_passwords").update({ message: next.broadcast_message, active_session: null, current_game: null, game_started_at: null }).not("id", "is", null);
+    }
+    if (level !== cur.lockdown_level) await logActivity("admin_lockdown", `Admin changed lockdown from Level ${cur.lockdown_level} to Level ${level}`);
+    if (data.kickAll) await logActivity("admin_panic", "Admin cleared all player sessions");
+    return { ok: true as const, lockdownLevel: level };
   });
 
 export const messageFriend = createServerFn({ method: "POST" })
