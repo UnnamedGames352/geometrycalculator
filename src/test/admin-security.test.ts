@@ -20,7 +20,7 @@ describe("admin security helpers", () => {
     const codes = generateRecoveryCodes();
     expect(codes).toHaveLength(10);
     expect(new Set(codes).size).toBe(10);
-    expect(hashRecoveryCode(codes[0])).toMatch(/^[a-f0-9]{64}$/);
+    expect(hashRecoveryCode(codes[0]!)).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("verifies RFC 6238 authenticator codes", () => {
