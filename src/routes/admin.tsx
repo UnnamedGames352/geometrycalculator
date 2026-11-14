@@ -433,8 +433,12 @@ function Admin() {
           </div>
           <div className="mt-4 flex justify-end"><Button variant={emergencyLevel >= 3 ? "destructive" : "default"} onClick={() => {
             const apply = async () => { await perform("Emergency protocol updated", () => setEmergency({ data: { level: emergencyLevel, notice: emergencyNotice } })); };
-            if (emergencyLevel >= 3 || settings.emergency_level >= 3) ask("Change emergency protocol?", emergencyLevel >= 4 ? "This will activate lockdown and immediately clear stored player sessions." : "This will activate lockdown and redirect active players out." : "This will de-escalate the current emergency protocol and may restore player access.", "Confirm protocol change", apply);
-            else void apply();
+            if (emergencyLevel >= 3 || settings.emergency_level >= 3) {
+              const description = emergencyLevel >= 3
+                ? emergencyLevel >= 4 ? "This will activate lockdown and immediately clear stored player sessions." : "This will activate lockdown and redirect active players out."
+                : "This will de-escalate the current emergency protocol and may restore player access.";
+              ask("Change emergency protocol?", description, "Confirm protocol change", apply);
+            } else void apply();
           }}>Apply protocol level {emergencyLevel}</Button></div>
         </div>
         <div className="rounded-xl border border-border bg-background p-5">
