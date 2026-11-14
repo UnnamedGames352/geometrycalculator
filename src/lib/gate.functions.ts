@@ -83,6 +83,11 @@ export const kickFriend = createServerFn({ method: "POST" })
   });
 
 // Owner signs in to the secret admin page with SITE_PASSWORD.
+export const checkAdminSession = createServerFn({ method: "GET" }).handler(async () => {
+  const { isAdmin } = await import("./gate.server");
+  return { admin: await isAdmin() };
+});
+
 export const checkAdminAccessServer = createServerFn({ method: "GET" }).handler(async () => {
   const { enforceChromebook, getGateSession } = await import("./gate.server");
   return { allowed: await enforceChromebook((await getGateSession()).data.deviceId) };

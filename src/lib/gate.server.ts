@@ -42,7 +42,7 @@ export async function logActivity(kind: string, detail = "", deviceId?: string, 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const [d, session] = await Promise.all([deviceInfo(), getGateSession()]);
   const id = deviceId ?? session.data.deviceId;
-  const { error } = await supabaseAdmin.from("activity_log").insert({ kind, detail: `${detail} — ${[d.device, d.location, d.ip && `IP ${d.ip}`].filter(Boolean).join(" · ")}`.slice(0,1000), device: d.device, device_id: id && DEVICE_ID_PATTERN.test(id) ? id : null, attempted_input: attemptedInput ?? null });
+  const { error } = await supabaseAdmin.from("activity_log").insert({ kind, detail: `${detail} — ${[d.device, d.location, d.ip && `IP ${d.ip}`].filter(Boolean).join(" · ")}`.slice(0,1000), device: d.device, device_id: id && DEVICE_ID_PATTERN.test(id) ? id : null, attempted_input: null });
   if (error) throw new Error("Could not record activity");
 }
 
