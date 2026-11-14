@@ -215,7 +215,7 @@ export async function isAdmin() {
   if (error) throw new Error("Could not validate admin session");
   if (!data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) {
     if (data && !data.revoked_at) await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id);
-    await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
+    await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
     return false;
   }
   if (s.data.adminRole !== data.role) await s.update({ ...s.data, adminRole: data.role as GateSession["adminRole"] });
