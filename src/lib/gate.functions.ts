@@ -240,7 +240,7 @@ export const updateSecurityAlertStatus = createServerFn({ method: "POST" })
     id: z.string().uuid(), status: z.enum(["acknowledged", "resolved"]),
   }).parse(d))
   .handler(async ({ data }) => {
-    await requireAdmin("updateSecurityAlertStatus", "support");
+    await requireAdmin("updateSecurityAlertStatus");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
     const patch = data.status === "acknowledged"
