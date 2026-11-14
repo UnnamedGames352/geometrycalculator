@@ -378,9 +378,33 @@ function Admin() {
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Recent security events</h3><p className="mt-1 text-sm text-muted-foreground">Latest authentication, blocking, tripwire, and admin events.</p></div><Button variant="outline" size="sm" onClick={() => setTab("activity")}>Open full audit</Button></div>
           {recentSecurityEvents.length === 0 ? <EmptyState title="No recent security events" detail="New security events will appear here as they happen." /> : <ol className="mt-3 divide-y divide-border rounded-xl border border-border bg-background">{recentSecurityEvents.map((entry) => <li key={`${entry.id}-security`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${["wrong", "admin_wrong", "blocked", "tripwire"].includes(entry.kind) ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>{entry.kind}</span></li>)}</ol>}
         </div>
-        <div className="grid gap-3 lg:grid-cols-2"><div className={`rounded-xl border p-5 ${settings.lockdown ? "border-destructive/40 bg-destructive/5" : "border-border bg-background"}`}><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><LockKeyhole className="h-5 w-5" /></span><div><h3 className="font-semibold">Lockdown</h3><p className="text-sm text-muted-foreground">Block access to the games hub and redirect players back to Geometry.</p></div></div><Button variant={settings.lockdown ? "outline" : "secondary"} className="mt-4" onClick={() => settings.lockdown
-          ? void perform("Lockdown disabled", () => save({ data: { lockdown: false } }))
-          : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdown: true } }); toast.success("Lockdown enabled"); await refresh(); })}>{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}</Button></div><div className="rounded-xl border border-border p-5"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Evict all active player sessions.</p></div></div><Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button></div></div>
+        <div className="rounded-xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h3 className="font-semibold">Site lockdown level</h3><p className="mt-1 text-sm text-muted-foreground">Changes apply on the next player check (normally within a few seconds). Level 5 immediately ends sessions and sends the emergency notice.</p></div>
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${settings.lockdown_level >= 3 ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}>Level {settings.lockdown_level} · {settings.lockdown_level >= 3 ? "Restricted" : "Operational"}</span>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {[
+              { level: 0, name: "Normal", detail: "All player access is available." },
+              { level: 1, name: "Monitoring", detail: "Normal access; heightened security logging." },
+              { level: 2, name: "Guarded", detail: "Block new player sign-ins; current sessions continue." },
+              { level: 3, name: "Restricted", detail: "Block player access to the games hub." },
+              { level: 4, name: "Lockdown", detail: "Block access and terminate all active player sessions." },
+              { level: 5, name: "Emergency", detail: "Level 4 plus an emergency announcement. Owner only." },
+            ].map((item) => <button key={item.level} type="button" disabled={settings.lockdown_level === item.level || saving} onClick={() => {
+              const apply = async () => { await save({ data: { lockdownLevel: item.level } }); toast.success(`Lockdown set to Level ${item.level}`); await refresh(); };
+              if (item.level >= 4) ask(`Enable Level ${item.level}?`, item.detail, `Set Level ${item.level}`, apply);
+              else void perform(`Lockdown set to Level ${item.level}`, apply);
+            }} className={`rounded-lg border p-3 text-left transition-colors ${settings.lockdown_level === item.level ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted/40"}`}>
+              <div className="flex items-center justify-between gap-2"><span className="font-semibold">Level {item.level} · {item.name}</span>{settings.lockdown_level === item.level && <Check className="h-4 w-4 text-primary" />}</div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+            </button>)}
+          </div>
+        </div>
+        <div className="mt-5 rounded-xl border border-border bg-background p-5">
+          <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-destructive/10 text-destructive"><Shield className="h-5 w-5" /></span><div><h3 className="font-semibold">Global Panic</h3><p className="text-sm text-muted-foreground">Immediately terminate all active player sessions without changing the lockdown level.</p></div></div>
+          <Button variant="destructive" className="mt-4" onClick={() => ask("Global Panic", "Every active player will be signed out and redirected to Geometry.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>Kick everyone</Button>
+        </div>
         <div className="mt-8"><div><h3 className="text-lg font-semibold">Banned browser IDs</h3><p className="mt-1 text-sm text-muted-foreground">Browser IDs can be reset and are not hardware identity.</p></div>
           {bans.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No browser IDs are currently banned.</p> : <ul className="mt-4 divide-y divide-border rounded-xl border border-border">{bans.map((item) => <li key={item.device_id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><code className="break-all font-mono text-xs">{item.device_id}</code><p className="mt-1 text-xs text-muted-foreground">{item.note || "No note"} · added {when(item.created_at)}</p></div><Button variant="outline" size="sm" onClick={() => void perform("Browser ID unbanned", () => ban({ data: { deviceId: item.device_id, banned: false } }))}>Unban</Button></li>)}</ul>}
         </div>
