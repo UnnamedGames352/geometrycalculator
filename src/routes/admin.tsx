@@ -137,7 +137,7 @@ function Admin() {
   }, [admin, tabOk]);
   useEffect(() => {
     if (!admin || !tabOk) return;
-    loadAdminSecurity({}).then(setAdminSecurity).catch(() => setAdminSecurity(null));
+    loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
   }, [admin, tabOk, tab]);
 
   if (!accessOk || (admin && tabOk === null)) return null;
@@ -402,9 +402,9 @@ function Admin() {
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${adminSecurity.twoFactorEnabled ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{adminSecurity.twoFactorEnabled ? "Two-factor enabled" : "Two-factor not enabled"}</span>
               <span className="text-sm text-muted-foreground">{adminSecurity.remainingRecoveryCodes} recovery codes remaining</span>
             </div>
-            <div className="flex justify-end"><Button variant="outline" size="sm" onClick={() => void perform("Signed out of this admin session", async () => { await lock({}); sessionStorage.removeItem("admin-tab"); sessionStorage.removeItem("gate-tab"); await router.navigate({ to: "/geometry" }); })}>Sign out this session</Button></div>
+            <div className="flex justify-end"><Button variant="outline" size="sm" onClick={() => void perform("Signed out of this admin session", async () => { await lock(); sessionStorage.removeItem("admin-tab"); sessionStorage.removeItem("gate-tab"); await router.navigate({ to: "/geometry" }); })}>Sign out this session</Button></div>
             <div><h4 className="font-semibold">Active administrator sessions</h4>
-              {adminSecurity.sessions.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No active sessions.</p> : <ul className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.sessions.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><p className="font-medium">{item.device || "Unknown device"} {item.current && <span className="ml-2 text-xs text-success">Current session</span>}</p><p className="mt-1 text-xs text-muted-foreground">{item.role} · Last active {when(item.last_seen_at)} · Expires {when(item.expires_at)}</p></div><Button size="sm" variant="outline" disabled={item.current} onClick={() => void perform("Admin session revoked", async () => { await revokeSession({ data: { id: item.id } }); setAdminSecurity(await loadAdminSecurity({})); })}>Revoke</Button></li>)}</ul>}
+              {adminSecurity.sessions.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No active sessions.</p> : <ul className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.sessions.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><p className="font-medium">{item.device || "Unknown device"} {item.current && <span className="ml-2 text-xs text-success">Current session</span>}</p><p className="mt-1 text-xs text-muted-foreground">{item.role} · Last active {when(item.last_seen_at)} · Expires {when(item.expires_at)}</p></div><Button size="sm" variant="outline" disabled={item.current} onClick={() => void perform("Admin session revoked", async () => { await revokeSession({ data: { id: item.id } }); setAdminSecurity(await loadAdminSecurity()); })}>Revoke</Button></li>)}</ul>}
             </div>
             <div><h4 className="font-semibold">Protected admin audit log</h4><p className="mt-1 text-xs text-muted-foreground">Append-only records of authenticator and session security events.</p>
               {adminSecurity.audit.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No admin security events recorded yet.</p> : <ol className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.audit.map((entry) => <li key={entry.id} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{entry.action.replace(/_/g, " ")}</span><span className="text-xs text-muted-foreground">{when(entry.created_at)}</span></div><p className="mt-1 text-sm text-muted-foreground">{entry.detail}</p></li>)}</ol>}
@@ -479,7 +479,7 @@ function AdminGate() {
       const password = new FormData(event.currentTarget).get("password") as string;
       const result = await login({ data: { password, deviceId } });
       if ("requiresSetup" in result && result.requiresSetup) {
-        const setup = await beginSetup({});
+        const setup = await beginSetup();
         setSecret(setup.secret);
         setUri(setup.uri);
         setStage("setup");
