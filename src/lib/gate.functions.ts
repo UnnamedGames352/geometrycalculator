@@ -173,27 +173,22 @@ export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
     const session = await getGateSession();
     if (!session.data.pendingAdminAuth || !session.data.deviceId) return { ok: false as const };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: security, error } = await supabaseAdmin.from("admin_security").select("*").eq("id", 1).maybeSingle();
+    const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled,totp_secret_ciphertext").eq("id", 1).maybeSingle();
     if (error || !security?.totp_enabled || !security.totp_secret_ciphertext) return { ok: false as const };
     const sessionSecret = process.env["SESSION_SECRET"];
     if (!sessionSecret) throw new Error("Session encryption is unavailable.");
     const { decryptTotpSecret, verifyTotp, hashRecoveryCode } = await import("./admin-security");
     let accepted = false;
-    let recoveryHashes = security.recovery_code_hashes ?? [];
     try { accepted = verifyTotp(decryptTotpSecret(security.totp_secret_ciphertext, sessionSecret), data.code); } catch { accepted = false; }
     if (!accepted) {
-      const candidate = hashRecoveryCode(data.code);
-      const index = recoveryHashes.indexOf(candidate);
-      if (index >= 0) { recoveryHashes = recoveryHashes.filter((_, i) => i !== index); accepted = true; }
+      const { data: consumed, error: consumeError } = await supabaseAdmin.rpc("consume_admin_recovery_code", { p_code_hash: hashRecoveryCode(data.code) });
+      if (consumeError) throw new Error("Could not verify recovery code");
+      accepted = !!consumed;
     }
     if (!accepted) {
       const { failedAdminSecondFactor } = await import("./gate.server");
       await failedAdminSecondFactor(session, session.data.deviceId);
       return { ok: false as const };
-    }
-    if (recoveryHashes.length !== (security.recovery_code_hashes ?? []).length) {
-      const { error: updateError } = await supabaseAdmin.from("admin_security").update({ recovery_code_hashes: recoveryHashes, updated_at: new Date().toISOString() }).eq("id", 1);
-      if (updateError) throw new Error("Could not consume recovery code");
     }
     await startAdminSession(session, session.data.deviceId);
     await recordAdminAudit("admin_two_factor_login", "Administrator completed two-factor authentication");
