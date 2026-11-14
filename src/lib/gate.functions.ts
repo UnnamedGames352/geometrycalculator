@@ -451,10 +451,10 @@ export const saveSettings = createServerFn({ method: "POST" })
     kickAll: !!d?.kickAll,
   }))
   .handler(async ({ data }) => {
-    await requireAdmin("saveSettings", data.lockdownLevel === 5 ? "owner" : "admin");
     const { getSettings, evictUsers, logActivity } = await import("./gate.server");
     const cur = await getSettings();
     const level = data.lockdownLevel ?? (data.lockdown === undefined ? cur.lockdown_level : data.lockdown ? 5 : 1);
+    await requireAdmin("saveSettings", level === 5 ? "owner" : "admin");
     const lockdown = level >= 3;
     const now = new Date().toISOString();
     const next = {
