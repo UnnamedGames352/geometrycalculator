@@ -16,6 +16,7 @@ type GateSession = {
   adminSessionToken?: string;
   adminRole?: 'owner' | 'admin' | 'moderator' | 'support';
   pendingAdminAuth?: boolean;
+  pendingAdminAttempts?: number;
   pendingTotpSecret?: string;
 };
 
@@ -139,6 +140,19 @@ export async function failedAttempt(kind: "wrong" | "admin_wrong", input: string
   if (data) await logActivity("blocked", "Auto-ban: 3 failed attempts within 5 minutes", deviceId);
 }
 
+export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
+  const attempts = (session.data.pendingAdminAttempts ?? 0) + 1;
+  await logActivity("admin_wrong", "Invalid administrator second factor", deviceId);
+  const locked = attempts >= 5;
+  await session.update({
+    ...session.data,
+    pendingAdminAttempts: locked ? undefined : attempts,
+    pendingAdminAuth: !locked,
+    pendingTotpSecret: locked ? undefined : session.data.pendingTotpSecret,
+  });
+  return locked;
+}
+
 export async function startAdminSession(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
   const { randomUUID } = await import("node:crypto");
   const token = randomUUID();
@@ -153,7 +167,7 @@ export async function startAdminSession(session: Awaited<ReturnType<typeof getGa
   if (error) throw new Error("Could not create admin session");
   await session.update({
     ...session.data, unlocked: true, admin: true, adminSessionToken: token,
-    adminRole: "owner", pendingAdminAuth: false, pendingTotpSecret: undefined,
+    adminRole: "owner", pendingAdminAuth: false, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
     deviceId, at: Date.now(), friendId: undefined, token: undefined,
   });
   await recordAdminAudit("admin_session_created", "Administrator session created");
