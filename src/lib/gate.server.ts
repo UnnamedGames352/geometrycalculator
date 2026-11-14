@@ -116,12 +116,14 @@ export async function enforceChromebook(deviceId?: string) {
   }
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  let confirmedTripwire = false;
   if (deviceId && DEVICE_ID_PATTERN.test(deviceId) && d.user_agent) {
     const { error } = await supabaseAdmin.rpc("tripwire_emergency", {
       p_device_id: deviceId,
       p_note: `Confirmed tripwire: non-Chromebook player access (${d.device})`,
     });
     if (error) throw new Error("Could not execute tripwire emergency response");
+    confirmedTripwire = true;
     await logActivity("tripwire", `TRIPWIRE CONFIRMED: ${d.device}. Device banned; Level 5 enabled; active sessions terminated; emergency message queued.`, deviceId);
   } else {
     await logActivity("tripwire_observed", `Non-Chromebook request observed without a verifiable browser ID (${d.device}); no site-wide response was triggered.`, deviceId);
@@ -132,8 +134,8 @@ export async function enforceChromebook(deviceId?: string) {
     admin: false,
     deviceId: deviceId ?? session.data.deviceId,
     at: session.data.at ?? Date.now(),
-    tripwireNotice: true,
-    tripwireNoticeShown: false,
+    tripwireNotice: confirmedTripwire,
+    tripwireNoticeShown: !confirmedTripwire,
   });
   return false;
 }
