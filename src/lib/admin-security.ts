@@ -15,7 +15,7 @@ export function buildTotpUri(secret: string, account = "Geometrycalculator Admin
 }
 
 export function verifyTotp(secret: string, token: string, now = Date.now()) {
-  if (!/^\\d{6}$/.test(token)) return false;
+  if (!/^\d{6}$/.test(token)) return false;
   const counter = Math.floor(now / 1000 / PERIOD_SECONDS);
   for (let offset = -1; offset <= 1; offset++) {
     const expected = totpAt(secret, counter + offset);
@@ -58,8 +58,8 @@ function totpAt(secret: string, counter: number) {
   const message = Buffer.alloc(8);
   message.writeBigUInt64BE(BigInt(counter));
   const digest = createHmac("sha1", decodeBase32(secret)).update(message).digest();
-  const offset = digest[digest.length - 1] & 0x0f;
-  const binary = ((digest[offset] & 0x7f) << 24) | ((digest[offset + 1] & 0xff) << 16) | ((digest[offset + 2] & 0xff) << 8) | (digest[offset + 3] & 0xff);
+  const offset = digest[digest.length - 1]! & 0x0f;
+  const binary = ((digest[offset]! & 0x7f) << 24) | ((digest[offset + 1]! & 0xff) << 16) | ((digest[offset + 2]! & 0xff) << 8) | (digest[offset + 3]! & 0xff);
   return String(binary % (10 ** DIGITS)).padStart(DIGITS, "0");
 }
 
