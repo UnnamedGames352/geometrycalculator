@@ -8,7 +8,7 @@ const DIGITS = 6;
 export function hashStaffPassword(password: string) {
   const salt = randomBytes(16).toString("base64url");
   const hash = scryptSync(password, salt, 64).toString("base64url");
-  return `scrypt${salt}${hash}`;
+  return "scrypt$" + salt + "$" + hash;
 }
 
 export function verifyStaffPassword(password: string, encoded: string) {
