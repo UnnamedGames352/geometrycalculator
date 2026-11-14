@@ -1,14 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
 
-async function requireAdmin() {
-  const { getGateSession } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) throw new Error("Not Found");
+async function requireAdmin(minimumRole: "moderator" | "owner" = "moderator") {
+  const { getGateSession, isAdmin } = await import("./gate.server");
+  if (!(await isAdmin())) throw new Error("Not Found");
+  const session = await getGateSession();
+  const levels: Record<string, number> = { support: 1, moderator: 2, admin: 3, owner: 4 };
+  if ((levels[session.data.adminRole ?? "owner"] ?? 0) < levels[minimumRole]) throw new Error("Not Found");
 }
 
 export const kickFriend = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => ({ id: String(d?.id ?? "").trim() }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requireAdmin("moderator");
     if (!data.id) throw new Error("Friend id is required.");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -23,7 +26,7 @@ export const kickFriend = createServerFn({ method: "POST" })
   });
 
 export const kickEveryone = createServerFn({ method: "POST" }).handler(async () => {
-  await requireAdmin();
+  await requireAdmin("owner");
   const { getSettings } = await import("./gate.server");
   const current = await getSettings();
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
