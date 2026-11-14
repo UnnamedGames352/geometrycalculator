@@ -424,7 +424,7 @@ export const updateFriend = createServerFn({ method: "POST" })
 
 export const getActivity = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession, getSettings } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, lockdown_level: 0, hidden_games: [] as string[], kick_all_at: null as string | null, broadcast_message: null as string | null } };
+  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, lockdown_level: 1, hidden_games: [] as string[], kick_all_at: null as string | null, broadcast_message: null as string | null } };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("activity_log").select("id, at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
   return { log: data ?? [], settings: await getSettings() };
@@ -440,7 +440,7 @@ export const clearActivity = createServerFn({ method: "POST" }).handler(async ()
 export const saveSettings = createServerFn({ method: "POST" })
   .inputValidator((d: { lockdown?: boolean; lockdownLevel?: number; hidden_games?: string[]; kickAll?: boolean }) => ({
     lockdown: d?.lockdown === undefined ? undefined : !!d.lockdown,
-    lockdownLevel: d?.lockdownLevel === undefined ? undefined : Math.max(0, Math.min(5, Math.trunc(Number(d.lockdownLevel)))),
+    lockdownLevel: d?.lockdownLevel === undefined ? undefined : Math.max(1, Math.min(5, Math.trunc(Number(d.lockdownLevel)))),
     hidden_games: Array.isArray(d?.hidden_games) ? d.hidden_games.map(String).filter((g) => /^[\w.-]+$/.test(g)).slice(0, 50) : undefined,
     kickAll: !!d?.kickAll,
   }))
@@ -448,7 +448,7 @@ export const saveSettings = createServerFn({ method: "POST" })
     await requireAdmin("saveSettings", data.lockdownLevel === 5 ? "owner" : "admin");
     const { getSettings, evictUsers, logActivity } = await import("./gate.server");
     const cur = await getSettings();
-    const level = data.lockdownLevel ?? (data.lockdown === undefined ? cur.lockdown_level : data.lockdown ? 5 : 0);
+    const level = data.lockdownLevel ?? (data.lockdown === undefined ? cur.lockdown_level : data.lockdown ? 5 : 1);
     const lockdown = level >= 3;
     const now = new Date().toISOString();
     const next = {
@@ -457,7 +457,7 @@ export const saveSettings = createServerFn({ method: "POST" })
       lockdown_level: level,
       hidden_games: data.hidden_games ?? cur.hidden_games,
       kick_all_at: data.kickAll || level >= 4 ? now : cur.kick_all_at,
-      broadcast_message: level === 5 ? "EMERGENCY LOCKDOWN — Site security controls have activated Level 5. All sessions have been terminated." : level === 0 ? null : cur.broadcast_message,
+      broadcast_message: level === 5 ? "EMERGENCY LOCKDOWN — Site security controls have activated Level 5. All sessions have been terminated." : level === 1 ? null : cur.broadcast_message,
     };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("site_settings").upsert(next);
