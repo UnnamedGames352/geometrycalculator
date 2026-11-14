@@ -219,7 +219,7 @@ export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handle
 export const revokeAdminSession = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data }) => {
-    await requireAdmin("revokeAdminSession");
+    await requireAdmin("revokeAdminSession", "owner");
     const { getGateSession, recordAdminAudit } = await import("./gate.server");
     const session = await getGateSession();
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
