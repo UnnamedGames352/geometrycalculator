@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   adminLogin,
+  checkAdminSession,
   getAdminSecurityOverview,
   revokeAdminSession,
   beginAdminTwoFactorSetup,
@@ -57,8 +58,8 @@ export const Route = createFileRoute("/admin")({
     { name: "robots", content: "noindex" },
   ] }),
   loader: async () => {
-    const [codes, friends, activity, bans] = await Promise.all([listCodes(), listFriends(), getActivity(), listBans()]);
-    return { ...codes, ...friends, ...activity, ...bans };
+    const [adminState, codes, friends, activity, bans] = await Promise.all([checkAdminSession(), listCodes(), listFriends(), getActivity(), listBans()]);
+    return { ...codes, ...friends, ...activity, ...bans, adminRole: adminState.role };
   },
   component: Admin,
 });
@@ -85,7 +86,7 @@ type ActivityFilter = "all" | "failed" | "success" | "admin";
 type RosterFilter = "all" | "playing" | "hub" | "offline" | "banned";
 
 function Admin() {
-  const { admin, codes, friends, log, settings, bans } = Route.useLoaderData();
+  const { admin, codes, friends, log, settings, bans, adminRole } = Route.useLoaderData();
   const router = useRouter();
   const ban = useServerFn(setBan);
   const panic = useServerFn(globalPanic);
@@ -142,7 +143,7 @@ function Admin() {
     loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
   }, [admin, tabOk, tab]);
 
-  const currentAdminRole = adminSecurity?.sessions.find((item) => item.current)?.role;
+  const currentAdminRole = adminRole ?? adminSecurity?.sessions.find((item) => item.current)?.role;
   useEffect(() => {
     if (!admin || !tabOk || tab !== "staff" || currentAdminRole !== "owner") return;
     loadStaff().then((result) => setStaffRows(result.staff)).catch(() => toast.error("Only the owner can manage staff accounts."));
@@ -310,7 +311,7 @@ function Admin() {
     </header>
 
     <nav aria-label="Admin sections" role="tablist" className="sticky top-0 z-10 mt-5 flex gap-2 overflow-x-auto rounded-xl border border-border bg-background/95 p-2 backdrop-blur">
-      {tabs.filter((item) => item.id !== "staff" || currentAdminRole === "owner").map(({ id, label, icon: Icon }) => {
+      {tabs.filter((item) => (item.id !== "staff" || currentAdminRole === "owner") && (item.id !== "access" || currentAdminRole === "admin" || currentAdminRole === "owner")).map(({ id, label, icon: Icon }) => {
         const count = id === "players" ? friends.length : id === "friends" ? onlineFriends.length : id === "access" ? codes.length : id === "security" ? bans.length : id === "activity" ? failureCount : null;
         return <button key={id} id={`admin-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls="admin-panel" onClick={() => setTab(id)} onKeyDown={(event) => {
           if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
