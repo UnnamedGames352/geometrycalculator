@@ -129,7 +129,6 @@ export async function enforceChromebook(deviceId?: string) {
     });
     if (error) throw new Error("Could not execute tripwire emergency response");
     confirmedTripwire = true;
-    await logActivity("tripwire", `TRIPWIRE CONFIRMED: ${d.device}. Device banned; Level 5 enabled; active sessions terminated; emergency message queued.`, deviceId);
   } else {
     await logActivity("tripwire_observed", `Non-Chromebook request observed without a verifiable browser ID (${d.device}); no site-wide response was triggered.`, deviceId);
   }
