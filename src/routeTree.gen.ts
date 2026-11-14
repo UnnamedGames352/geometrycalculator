@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AppealRouteImport } from './routes/appeal'
 import { Route as GeometryRouteImport } from './routes/geometry'
 import { Route as HubRouteImport } from './routes/hub'
 import { Route as PlaySplatRouteImport } from './routes/play/$'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppealRoute = AppealRouteImport.update({
+  id: '/appeal',
+  path: '/appeal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GeometryRoute = GeometryRouteImport.update({
@@ -44,6 +50,7 @@ const PlaySplatRoute = PlaySplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/appeal': typeof AppealRoute
   '/geometry': typeof GeometryRoute
   '/hub': typeof HubRoute
   '/play/$': typeof PlaySplatRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/appeal': typeof AppealRoute
   '/geometry': typeof GeometryRoute
   '/hub': typeof HubRoute
   '/play/$': typeof PlaySplatRoute
@@ -59,13 +67,534 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/appeal': typeof AppealRoute
   '/geometry': typeof GeometryRoute
   '/hub': typeof HubRoute
   '/play/$': typeof PlaySplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  fullPaths: '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/
+  id: '__root__' | '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  AppealRoute: typeof AppealRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/appeal': {
+      id: '/appeal'
+      path: '/appeal'
+      fullPath: '/appeal'
+      preLoaderRoute: typeof AppealRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  AppealRoute: AppealRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
+  id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
+  id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  GeometryRoute: typeof GeometryRoute
+  HubRoute: typeof HubRoute
+  PlaySplatRoute: typeof PlaySplatRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/geometry': {
+      id: '/geometry'
+      path: '/geometry'
+      fullPath: '/geometry'
+      preLoaderRoute: typeof GeometryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hub': {
+      id: '/hub'
+      path: '/hub'
+      fullPath: '/hub'
+      preLoaderRoute: typeof HubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/play/$': {
+      id: '/play/$'
+      path: '/play/$'
+      fullPath: '/play/$'
+      preLoaderRoute: typeof PlaySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  GeometryRoute: GeometryRoute,
+  HubRoute: HubRoute,
+  PlaySplatRoute: PlaySplatRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
+
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
   id: '__root__' | '/' | '/admin' | '/geometry' | '/hub' | '/play/$'
