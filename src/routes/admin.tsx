@@ -3,6 +3,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   adminLogin,
+  beginAdminTwoFactorSetup,
+  confirmAdminTwoFactorSetup,
+  verifyAdminTwoFactor,
   checkAdminAccess,
   checkAdminAccessServer,
   globalPanic,
@@ -433,14 +436,84 @@ function EmptyState({ title, detail }: { title: string; detail: string }) { retu
 function AdminGate() {
   const router = useRouter();
   const login = useServerFn(adminLogin);
+  const beginSetup = useServerFn(beginAdminTwoFactorSetup);
+  const confirmSetup = useServerFn(confirmAdminTwoFactorSetup);
+  const verifySecondFactor = useServerFn(verifyAdminTwoFactor);
   const [deviceId, setDeviceId] = useState("");
+  const [stage, setStage] = useState<"password" | "setup" | "verify" | "recovery">("password");
+  const [secret, setSecret] = useState("");
+  const [uri, setUri] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   useEffect(() => { setDeviceId(getBrowserDeviceId()); }, []);
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+
+  async function onPassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const password = new FormData(event.currentTarget).get("password") as string;
-    const { ok } = await login({ data: { password, deviceId } });
-    if (ok) { sessionStorage.setItem("admin-tab", "1"); sessionStorage.setItem("gate-tab", "1"); await router.invalidate(); }
-    else await router.navigate({ to: "/geometry" });
+    setBusy(true);
+    try {
+      const password = new FormData(event.currentTarget).get("password") as string;
+      const result = await login({ data: { password, deviceId } });
+      if (result.requiresSetup) {
+        const setup = await beginSetup({});
+        setSecret(setup.secret);
+        setUri(setup.uri);
+        setStage("setup");
+      } else if (result.requiresTwoFactor) setStage("verify");
+      else toast.error("Admin sign-in failed.");
+    } catch { toast.error("Admin sign-in failed."); }
+    finally { setBusy(false); }
   }
-  return <div className="min-h-screen bg-background p-8 font-serif text-foreground"><h1 className="text-center text-3xl font-bold">404 Not Found</h1><hr className="my-4 border-border" /><p className="text-center text-muted-foreground">This page is reserved for the site owner.</p><form onSubmit={onSubmit} className="mx-auto mt-6 max-w-sm space-y-3"><Input name="password" type="password" placeholder="Admin password" autoComplete="off" /><Button type="submit" className="w-full">Unlock</Button></form></div>;
+
+  async function onCode(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const code = new FormData(event.currentTarget).get("code") as string;
+      if (stage === "setup") {
+        const result = await confirmSetup({ data: { code } });
+        if (!result.ok) { toast.error(result.error); return; }
+        setRecoveryCodes(result.recoveryCodes);
+        setStage("recovery");
+      } else {
+        const result = await verifySecondFactor({ data: { code } });
+        if (!result.ok) { toast.error("That code was not accepted."); return; }
+        finishLogin();
+      }
+    } catch { toast.error("Two-factor verification failed."); }
+    finally { setBusy(false); }
+  }
+
+  function finishLogin() {
+    sessionStorage.setItem("admin-tab", "1");
+    sessionStorage.setItem("gate-tab", "1");
+    void router.invalidate();
+  }
+
+  return <div className="min-h-screen bg-background p-8 font-serif text-foreground">
+    <h1 className="text-center text-3xl font-bold">404 Not Found</h1>
+    <hr className="my-4 border-border" />
+    <p className="text-center text-muted-foreground">This page is reserved for the site owner.</p>
+    {stage === "password" && <form onSubmit={onPassword} className="mx-auto mt-6 max-w-sm space-y-3">
+      <Input name="password" type="password" placeholder="Admin password" autoComplete="off" required />
+      <Button type="submit" className="w-full" disabled={!deviceId || busy}>{busy ? "Checking…" : "Continue"}</Button>
+    </form>}
+    {stage === "setup" && <div className="mx-auto mt-6 max-w-md space-y-4">
+      <h2 className="text-center text-xl font-semibold">Set up two-factor authentication</h2>
+      <p className="text-sm text-muted-foreground">Add this account to an authenticator app, then enter the six-digit code it generates.</p>
+      <div className="rounded-lg border border-border bg-muted/30 p-4"><p className="text-xs text-muted-foreground">Manual setup key</p><code className="mt-2 block break-all text-sm">{secret}</code></div>
+      <a className="block break-all text-xs text-primary underline" href={uri}>{uri}</a>
+      <form onSubmit={onCode} className="space-y-3"><Input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="6-digit authenticator code" required /><Button className="w-full" type="submit" disabled={busy}>{busy ? "Verifying…" : "Enable two-factor authentication"}</Button></form>
+    </div>}
+    {stage === "verify" && <form onSubmit={onCode} className="mx-auto mt-6 max-w-sm space-y-3">
+      <p className="text-center text-sm text-muted-foreground">Enter your authenticator code or a one-time recovery code.</p>
+      <Input name="code" autoComplete="one-time-code" placeholder="Authenticator or recovery code" required />
+      <Button className="w-full" type="submit" disabled={busy}>{busy ? "Verifying…" : "Verify and unlock"}</Button>
+    </form>}
+    {stage === "recovery" && <div className="mx-auto mt-6 max-w-md space-y-4">
+      <h2 className="text-center text-xl font-semibold">Save your recovery codes</h2>
+      <p className="text-sm text-muted-foreground">Each code works once. Save these somewhere secure now; they will not be shown again.</p>
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-border p-4">{recoveryCodes.map((code) => <code key={code} className="text-center text-sm">{code}</code>)}</div>
+      <Button className="w-full" onClick={finishLogin}>I saved my recovery codes — continue</Button>
+    </div>}
+  </div>;
 }
