@@ -406,7 +406,7 @@ function Admin() {
               {adminSecurity.sessions.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No active sessions.</p> : <ul className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.sessions.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><p className="font-medium">{item.device || "Unknown device"} {item.current && <span className="ml-2 text-xs text-success">Current session</span>}</p><p className="mt-1 text-xs text-muted-foreground">{item.role} · Last active {when(item.last_seen_at)} · Expires {when(item.expires_at)}</p></div><Button size="sm" variant="outline" disabled={item.current} onClick={() => void perform("Admin session revoked", async () => { await revokeSession({ data: { id: item.id } }); setAdminSecurity(await loadAdminSecurity({})); })}>Revoke</Button></li>)}</ul>}
             </div>
             <div><h4 className="font-semibold">Protected admin audit log</h4><p className="mt-1 text-xs text-muted-foreground">Append-only records of authenticator and session security events.</p>
-              {adminSecurity.audit.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No admin security events recorded yet.</p> : <ol className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.audit.map((entry) => <li key={entry.id} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{entry.action.replaceAll("_", " ")}</span><span className="text-xs text-muted-foreground">{when(entry.created_at)}</span></div><p className="mt-1 text-sm text-muted-foreground">{entry.detail}</p></li>)}</ol>}
+              {adminSecurity.audit.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No admin security events recorded yet.</p> : <ol className="mt-2 divide-y divide-border rounded-xl border border-border">{adminSecurity.audit.map((entry) => <li key={entry.id} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{entry.action.replace(/_/g, " ")}</span><span className="text-xs text-muted-foreground">{when(entry.created_at)}</span></div><p className="mt-1 text-sm text-muted-foreground">{entry.detail}</p></li>)}</ol>}
             </div>
           </>}
         </div>
@@ -477,12 +477,12 @@ function AdminGate() {
     try {
       const password = new FormData(event.currentTarget).get("password") as string;
       const result = await login({ data: { password, deviceId } });
-      if (result.requiresSetup) {
+      if ("requiresSetup" in result && result.requiresSetup) {
         const setup = await beginSetup({});
         setSecret(setup.secret);
         setUri(setup.uri);
         setStage("setup");
-      } else if (result.requiresTwoFactor) setStage("verify");
+      } else if ("requiresTwoFactor" in result && result.requiresTwoFactor) setStage("verify");
       else toast.error("Admin sign-in failed.");
     } catch { toast.error("Admin sign-in failed."); }
     finally { setBusy(false); }
