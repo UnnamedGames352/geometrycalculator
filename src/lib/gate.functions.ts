@@ -219,19 +219,37 @@ export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handle
   const { createHash } = await import("node:crypto");
   const hash = session.data.adminSessionToken ? createHash("sha256").update(session.data.adminSessionToken).digest("hex") : "";
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }] = await Promise.all([
+  const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }, { data: alerts, error: alertsError }] = await Promise.all([
     supabaseAdmin.from("admin_security").select("totp_enabled,recovery_code_hashes").eq("id", 1).maybeSingle(),
     supabaseAdmin.from("admin_sessions").select("id,role,device,ip,created_at,last_seen_at,expires_at,revoked_at,session_token_hash").is("revoked_at", null).gt("expires_at", new Date().toISOString()).order("last_seen_at", { ascending: false }).limit(30),
     supabaseAdmin.from("admin_audit_log").select("id,actor_role,action,detail,device,ip,created_at").order("created_at", { ascending: false }).limit(40),
+    supabaseAdmin.from("security_alerts").select("id,severity,category,title,detail,device_id,ip,status,created_at,acknowledged_at,resolved_at").order("created_at", { ascending: false }).limit(50),
   ]);
-  if (settingsError || sessionsError || auditError) throw new Error("Could not load admin security overview");
+  if (settingsError || sessionsError || auditError || alertsError) throw new Error("Could not load admin security overview");
   return {
     twoFactorEnabled: !!settings?.totp_enabled,
     remainingRecoveryCodes: settings?.recovery_code_hashes?.length ?? 0,
     sessions: (sessions ?? []).map(({ session_token_hash, ...row }) => ({ ...row, current: session_token_hash === hash })),
     audit: audit ?? [],
+    alerts: alerts ?? [],
   };
 });
+
+export const updateSecurityAlertStatus = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string; status: "acknowledged" | "resolved" }) => z.object({
+    id: z.string().uuid(), status: z.enum(["acknowledged", "resolved"]),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("updateSecurityAlertStatus", "support");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+    const patch = data.status === "acknowledged"
+      ? { status: data.status, acknowledged_at: now }
+      : { status: data.status, acknowledged_at: now, resolved_at: now };
+    const { error } = await supabaseAdmin.from("security_alerts").update(patch).eq("id", data.id);
+    if (error) throw new Error("Could not update security alert.");
+    return { ok: true as const };
+  });
 
 export const revokeAdminSession = createServerFn({ method: "POST" })
   .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
