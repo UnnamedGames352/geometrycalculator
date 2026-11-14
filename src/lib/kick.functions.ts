@@ -5,7 +5,7 @@ async function requireAdmin(minimumRole: "moderator" | "owner" = "moderator") {
   if (!(await isAdmin())) throw new Error("Not Found");
   const session = await getGateSession();
   const levels: Record<string, number> = { support: 1, moderator: 2, admin: 3, owner: 4 };
-  if ((levels[session.data.adminRole ?? "owner"] ?? 0) < levels[minimumRole]) throw new Error("Not Found");
+  if ((levels[session.data.adminRole ?? "owner"] ?? 0) < (levels[minimumRole] ?? 0)) throw new Error("Not Found");
 }
 
 export const kickFriend = createServerFn({ method: "POST" })
