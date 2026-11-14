@@ -26,6 +26,10 @@ import {
   messageOnlineFriend,
   messageOnlineFriends,
   messageAllFriends,
+  listStaff,
+  createStaff,
+  updateStaff,
+  deleteStaff,
 } from "@/lib/gate.functions";
 import { getBrowserDeviceId, isFriendOnline, DEVICE_ID_PATTERN, creditSeconds, formatDuration, topGame } from "@/lib/security-rules";
 import { Button } from "@/components/ui/button";
@@ -67,6 +71,7 @@ const tabs = [
   { id: "friends", label: "Friend accounts", icon: Users },
   { id: "access", label: "Access codes", icon: KeyRound },
   { id: "security", label: "Security Center", icon: Shield },
+  { id: "staff", label: "Staff", icon: Users },
   { id: "activity", label: "Activity audit", icon: Activity },
 ] as const;
 type AdminTab = typeof tabs[number]["id"];
@@ -98,6 +103,15 @@ function Admin() {
   const removeCode = useServerFn(deleteCode);
   const lock = useServerFn(lockAdmin);
   const loadAdminSecurity = useServerFn(getAdminSecurityOverview);
+  const loadStaff = useServerFn(listStaff);
+  const addStaff = useServerFn(createStaff);
+  const editStaff = useServerFn(updateStaff);
+  const removeStaff = useServerFn(deleteStaff);
+  const [staffRows, setStaffRows] = useState<Awaited<ReturnType<typeof listStaff>>["staff"]>([]);
+  const [staffUsername, setStaffUsername] = useState("");
+  const [staffPassword, setStaffPassword] = useState("");
+  const [staffRole, setStaffRole] = useState<"admin" | "moderator" | "support">("moderator");
+  const [newStaffCredentials, setNewStaffCredentials] = useState<{ username: string; secret: string; uri: string } | null>(null);
   const revokeSession = useServerFn(revokeAdminSession);
   const [adminSecurity, setAdminSecurity] = useState<Awaited<ReturnType<typeof getAdminSecurityOverview>> | null>(null);
   const [tabOk, setTabOk] = useState<boolean | null>(null);
@@ -127,6 +141,12 @@ function Admin() {
     if (!admin || !tabOk) return;
     loadAdminSecurity().then(setAdminSecurity).catch(() => setAdminSecurity(null));
   }, [admin, tabOk, tab]);
+
+  const currentAdminRole = adminSecurity?.sessions.find((item) => item.current)?.role;
+  useEffect(() => {
+    if (!admin || !tabOk || tab !== "staff" || currentAdminRole !== "owner") return;
+    loadStaff().then((result) => setStaffRows(result.staff)).catch(() => toast.error("Only the owner can manage staff accounts."));
+  }, [admin, tabOk, tab, currentAdminRole]);
 
   if (admin && tabOk === null) return null;
   if (!admin || !tabOk) return <AdminGate />;
@@ -290,7 +310,7 @@ function Admin() {
     </header>
 
     <nav aria-label="Admin sections" role="tablist" className="sticky top-0 z-10 mt-5 flex gap-2 overflow-x-auto rounded-xl border border-border bg-background/95 p-2 backdrop-blur">
-      {tabs.map(({ id, label, icon: Icon }) => {
+      {tabs.filter((item) => item.id !== "staff" || currentAdminRole === "owner").map(({ id, label, icon: Icon }) => {
         const count = id === "players" ? friends.length : id === "friends" ? onlineFriends.length : id === "access" ? codes.length : id === "security" ? bans.length : id === "activity" ? failureCount : null;
         return <button key={id} id={`admin-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls="admin-panel" onClick={() => setTab(id)} onKeyDown={(event) => {
           if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
@@ -426,6 +446,27 @@ function Admin() {
         </div>
       </section>}
 
+      {tab === "staff" && currentAdminRole === "owner" && <section>
+        <div className="max-w-2xl"><h3 className="font-semibold">Create a staff account</h3><p className="mt-1 text-sm text-muted-foreground">Each staff member gets a separate username, password and authenticator secret. The authenticator secret is shown only once when the account is created.</p></div>
+        <form className="mt-4 grid gap-3 rounded-xl border border-border bg-background p-4 sm:grid-cols-2" onSubmit={async (event) => {
+          event.preventDefault();
+          try {
+            const result = await addStaff({ data: { username: staffUsername, password: staffPassword, role: staffRole } });
+            setNewStaffCredentials({ username: result.staff.username, secret: result.authenticatorSecret, uri: result.authenticatorUri });
+            setStaffUsername(""); setStaffPassword("");
+            setStaffRows((rows) => [...rows, result.staff]);
+            toast.success("Staff account created. Save its authenticator setup key now.");
+          } catch (error) { toast.error(error instanceof Error ? error.message : "Could not create staff account."); }
+        }}>
+          <label className="text-sm font-medium">Username<Input value={staffUsername} onChange={(event) => setStaffUsername(event.target.value)} minLength={3} maxLength={32} required className="mt-1" /></label>
+          <label className="text-sm font-medium">Temporary password<Input type="password" value={staffPassword} onChange={(event) => setStaffPassword(event.target.value)} minLength={12} maxLength={200} required className="mt-1" /></label>
+          <label className="text-sm font-medium">Role<select value={staffRole} onChange={(event) => setStaffRole(event.target.value as typeof staffRole)} className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3"><option value="support">Support</option><option value="moderator">Moderator</option><option value="admin">Administrator</option></select></label>
+          <div className="flex items-end"><Button type="submit">Create staff account</Button></div>
+        </form>
+        {newStaffCredentials && <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4"><h4 className="font-semibold">Authenticator setup for {newStaffCredentials.username}</h4><p className="mt-1 text-sm text-muted-foreground">Give this setup key to the staff member through a secure channel and have them add it to their authenticator app. It will not be shown again after leaving this screen.</p><code className="mt-3 block break-all rounded bg-background p-3 text-sm">{newStaffCredentials.secret}</code><a href={newStaffCredentials.uri} className="mt-2 inline-block text-sm text-primary underline">Open authenticator app</a><Button className="mt-3" size="sm" variant="outline" onClick={() => setNewStaffCredentials(null)}>I saved the setup key</Button></div>}
+        <div className="mt-6"><h3 className="font-semibold">Staff accounts</h3>{staffRows.length === 0 ? <p className="mt-3 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No staff accounts have been created.</p> : <ul className="mt-3 divide-y divide-border rounded-xl border border-border">{staffRows.map((staff) => <li key={staff.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold">{staff.username}</p><p className="mt-1 text-xs text-muted-foreground">{staff.role} · {staff.disabled ? "Disabled" : "Active"} · Created {when(staff.created_at)}</p></div><div className="flex flex-wrap gap-2"><select aria-label={`Role for ${staff.username}`} value={staff.role} onChange={async (event) => { const role = event.target.value as "admin" | "moderator" | "support"; try { const result = await editStaff({ data: { id: staff.id, role } }); setStaffRows((rows) => rows.map((row) => row.id === staff.id ? { ...row, role: result.staff.role } : row)); } catch { toast.error("Could not update staff role."); } }} className="h-9 rounded-md border border-border bg-background px-2 text-xs"><option value="support">Support</option><option value="moderator">Moderator</option><option value="admin">Administrator</option></select><Button size="sm" variant="outline" onClick={async () => { try { const disabled = !staff.disabled; await editStaff({ data: { id: staff.id, disabled } }); setStaffRows((rows) => rows.map((row) => row.id === staff.id ? { ...row, disabled } : row)); } catch { toast.error("Could not update staff account."); } }}>{staff.disabled ? "Enable" : "Disable"}</Button><Button size="sm" variant="destructive" onClick={() => ask("Delete staff account?", `Permanently remove ${staff.username} and revoke their sessions?`, "Delete account", async () => { await removeStaff({ data: { id: staff.id } }); setStaffRows((rows) => rows.filter((row) => row.id !== staff.id)); toast.success("Staff account deleted"); })}>Delete</Button></div></li>)}</ul>}</div>
+      </section>}
+
       {tab === "activity" && <section><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm text-muted-foreground">Recent security and sign-in events. Attempted inputs are kept for audit only.</p></div><Button variant="outline" size="sm" onClick={() => void perform("Activity log cleared", () => clearLog({}))}>Clear log</Button></div>
         <div className="mt-4 flex flex-wrap gap-1.5">{(["all", "failed", "success", "admin"] as const).map((filter) => <FilterPill key={filter} active={activityFilter === filter} onClick={() => setActivityFilter(filter)}>{filter === "all" ? "All" : filter === "failed" ? "Failed" : filter === "success" ? "Success" : "Admin"}</FilterPill>)}</div>
         {filteredLog.length === 0 ? <EmptyState title="No activity in this view" detail="New activity will appear here as it happens."/> : <ol className="mt-4 divide-y divide-border rounded-xl border border-border bg-background">{filteredLog.map((entry) => <li key={`${entry.id}-${entry.at}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{entry.detail}</p><p className="mt-1 text-xs text-muted-foreground">{entry.kind} · {when(entry.at)}</p>{entry.attempted_input && <p className="mt-2 text-xs text-muted-foreground">Submitted input redacted for security.</p>}</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${entry.kind.includes("wrong") || entry.kind === "blocked" || entry.kind === "tripwire" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{entry.kind}</span></li>)}</ol>}
@@ -489,8 +530,10 @@ function AdminGate() {
     event.preventDefault();
     setBusy(true);
     try {
-      const password = new FormData(event.currentTarget).get("password") as string;
-      const result = await login({ data: { password, deviceId } });
+      const form = new FormData(event.currentTarget);
+      const password = form.get("password") as string;
+      const username = String(form.get("username") ?? "").trim();
+      const result = await login({ data: { password, deviceId, ...(username ? { username } : {}) } });
       if ("requiresSetup" in result && result.requiresSetup) {
         const setup = await beginSetup();
         setSecret(setup.secret);
@@ -532,7 +575,8 @@ function AdminGate() {
     <hr className="my-4 border-border" />
     <p className="text-center text-muted-foreground">This page is reserved for the site owner.</p>
     {stage === "password" && <form onSubmit={onPassword} className="mx-auto mt-6 max-w-sm space-y-3">
-      <Input name="password" type="password" placeholder="Admin password" autoComplete="off" required />
+      <Input name="username" placeholder="Staff username (leave blank for owner)" autoComplete="username" />
+      <Input name="password" type="password" placeholder="Password" autoComplete="current-password" required />
       <Button type="submit" className="w-full" disabled={!deviceId || busy}>{busy ? "Checking…" : "Continue"}</Button>
     </form>}
     {stage === "setup" && <div className="mx-auto mt-6 max-w-md space-y-4">
