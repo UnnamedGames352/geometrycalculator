@@ -278,11 +278,11 @@ function Admin() {
         <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${settings.lockdown ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success"}`}><span className={`h-2.5 w-2.5 rounded-full ${settings.lockdown ? "bg-destructive" : "animate-pulse bg-success"}`} />{settings.lockdown ? `Level ${settings.lockdown_level} active` : settings.lockdown_level === 2 ? "Level 2 · Guarded" : "Level 1 · Normal"}</div>
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-5">
-        <Button variant={settings.lockdown ? "outline" : "secondary"} onClick={() => settings.lockdown
+        {(currentAdminRole === "admin" || currentAdminRole === "owner") && <Button variant={settings.lockdown ? "outline" : "secondary"} onClick={() => settings.lockdown
           ? void perform("Lockdown disabled", () => save({ data: { lockdownLevel: 1 } }))
           : ask("Enable lockdown?", "Players will lose access to the games hub until lockdown is disabled.", "Enable lockdown", async () => { await save({ data: { lockdownLevel: 3 } }); toast.success("Lockdown enabled"); await refresh(); })}>
           <LockKeyhole className="mr-2 h-4 w-4" />{settings.lockdown ? "Disable lockdown" : "Enable lockdown"}
-        </Button>
+        </Button>}
         {currentAdminRole === "owner" && <Button variant="destructive" onClick={() => ask("Global Panic", "This immediately signs out every player and sends them to Geometry. This cannot be undone.", "Kick everyone", async () => { await panic(); toast.success("All player sessions evicted"); await refresh(); })}>
           <X className="mr-2 h-4 w-4" />Global Panic
         </Button>}
