@@ -75,24 +75,29 @@ async function latestEvictionEvent(): Promise<{ at: string; kind: string } | nul
 
 export async function getTripwireBroadcast() {
   const session = await getGateSession();
-  if (session.data.tripwireNotice && !session.data.tripwireNoticeShown) return TRIPWIRE_NOTICE;
+  const settings = await getSettings();
+  const message = settings.broadcast_message ?? TRIPWIRE_NOTICE;
+  if (session.data.tripwireNotice && !session.data.tripwireNoticeShown) return message;
   if (session.data.tripwireNoticeShown || !session.data.at) return null;
   const event = await latestEvictionEvent();
-  return event?.kind === "tripwire" && Date.parse(event.at) > session.data.at ? TRIPWIRE_NOTICE : null;
+  const newerThanSession = !!event && Date.parse(event.at) > session.data.at;
+  return newerThanSession && (event.kind === "tripwire" || settings.lockdown_level === 5) ? message : null;
 }
 
 export async function takeTripwireNotice() {
   const session = await getGateSession();
+  const settings = await getSettings();
+  const message = settings.broadcast_message ?? TRIPWIRE_NOTICE;
   if (session.data.tripwireNoticeShown) return null;
   if (session.data.tripwireNotice) {
     await session.update({ ...session.data, tripwireNotice: false, tripwireNoticeShown: true });
-    return TRIPWIRE_NOTICE;
+    return message;
   }
   if (!session.data.at) return null;
   const event = await latestEvictionEvent();
-  if (event?.kind !== "tripwire" || Date.parse(event.at) <= session.data.at) return null;
+  if (!event || Date.parse(event.at) <= session.data.at || (event.kind !== "tripwire" && settings.lockdown_level !== 5)) return null;
   await session.update({ ...session.data, tripwireNoticeShown: true });
-  return TRIPWIRE_NOTICE;
+  return message;
 }
 
 export async function enforceChromebook(deviceId?: string) {
