@@ -215,7 +215,6 @@ export type Database = {
         }
         Relationships: []
       }
-    }
       admin_security: {
         Row: { id: number; totp_secret_ciphertext: string | null; totp_enabled: boolean; recovery_code_hashes: string[]; updated_at: string }
         Insert: { id: number; totp_secret_ciphertext?: string | null; totp_enabled?: boolean; recovery_code_hashes?: string[]; updated_at?: string }
@@ -234,6 +233,7 @@ export type Database = {
         Update: { id?: number; actor_session_id?: string | null; actor_role?: string; action?: string; detail?: string; device?: string | null; ip?: string | null; created_at?: string }
         Relationships: []
       }
+    }
     Views: {
       [_ in never]: never
     }
