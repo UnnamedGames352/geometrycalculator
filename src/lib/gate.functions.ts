@@ -14,7 +14,9 @@ export const redeemCode = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getGateSession, enforceChromebook, isDeviceBanned, logActivity, getSettings, failedAttempt, deviceInfo, settlePlaytime } = await import("./gate.server");
     if (!(await enforceChromebook(data.deviceId))) { await logActivity("blocked", "Non-Chromebook unlock rejected", data.deviceId, data.code); return { ok: false as const }; }
-    if ((await getSettings()).lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
+    const platformSettings = await getSettings();
+    if (platformSettings.lockdown) { await logActivity("blocked", "Lockdown active: rejected input", data.deviceId, data.code); return { ok: false as const }; }
+    if (platformSettings.emergency_level >= 2) { await logActivity("blocked", `Emergency protocol level ${platformSettings.emergency_level}: new player access restricted`, data.deviceId); return { ok: false as const }; }
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted code", data.deviceId, data.code); return { ok: false as const }; }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const now = new Date().toISOString();
@@ -346,7 +348,7 @@ export const updateFriend = createServerFn({ method: "POST" })
 
 export const getActivity = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession, getSettings } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null } };
+  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, hidden_games: [] as string[], kick_all_at: null as string | null, emergency_level: 0, emergency_notice: "", emergency_updated_at: null as string | null } };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("activity_log").select("id, at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
   return { log: data ?? [], settings: await getSettings() };
@@ -357,6 +359,73 @@ export const clearActivity = createServerFn({ method: "POST" }).handler(async ()
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   await supabaseAdmin.from("activity_log").delete().not("id", "is", null);
   return { ok: true };
+});
+
+export const setEmergencyProtocol = createServerFn({ method: "POST" })
+  .inputValidator((d: { level: number; notice?: string }) => z.object({
+    level: z.number().int().min(0).max(4),
+    notice: z.string().trim().max(300).optional(),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin("setEmergencyProtocol", "admin");
+    const { getSettings, evictUsers, logActivity } = await import("./gate.server");
+    const current = await getSettings();
+    const now = new Date().toISOString();
+    const level = data.level;
+    const lockdown = level >= 3 ? true : level < 3 && current.emergency_level >= 3 ? false : current.lockdown;
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("site_settings").upsert({
+      id: 1,
+      lockdown,
+      hidden_games: current.hidden_games,
+      kick_all_at: level >= 3 ? now : current.kick_all_at,
+      emergency_level: level,
+      emergency_notice: data.notice ?? "",
+      emergency_updated_at: now,
+    });
+    if (error) throw new Error("Could not update emergency protocol.");
+    if (level >= 3) await evictUsers(true);
+    await logActivity("emergency_protocol", `Emergency protocol changed from level ${current.emergency_level} to level ${level}`);
+    return { ok: true as const, lockdown };
+  });
+
+export const getPlatformAnalytics = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin("viewPlatformAnalytics", "support");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const now = Date.now();
+  const sevenDaysAgo = new Date(now - 7 * 86_400_000).toISOString();
+  const [{ data: players, error: playersError }, { data: activity, error: activityError }] = await Promise.all([
+    supabaseAdmin.from("friend_passwords").select("id,active_session,last_seen,total_play_seconds,play_seconds,current_game"),
+    supabaseAdmin.from("activity_log").select("at,kind").gte("at", sevenDaysAgo).order("at", { ascending: false }).limit(5000),
+  ]);
+  if (playersError || activityError) throw new Error("Could not load platform analytics.");
+  const cutoff = now - 120_000;
+  const rows = players ?? [];
+  const online = rows.filter((player) => !!player.active_session && !!player.last_seen && Date.parse(player.last_seen) >= cutoff).length;
+  const totalPlaySeconds = rows.reduce((sum, player) => sum + (player.total_play_seconds ?? 0), 0);
+  const gameTotals = new Map<string, number>();
+  for (const player of rows) {
+    const stats = player.play_seconds && typeof player.play_seconds === "object" && !Array.isArray(player.play_seconds)
+      ? player.play_seconds as Record<string, unknown> : {};
+    for (const [game, seconds] of Object.entries(stats)) {
+      if (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0) gameTotals.set(game, (gameTotals.get(game) ?? 0) + seconds);
+    }
+  }
+  const daily = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now - (6 - index) * 86_400_000);
+    const key = date.toISOString().slice(0, 10);
+    const count = (activity ?? []).filter((entry) => entry.kind === "login" && entry.at.slice(0, 10) === key).length;
+    return { date: key, signIns: count };
+  });
+  const signIns7d = daily.reduce((sum, day) => sum + day.signIns, 0);
+  return {
+    totalPlayers: rows.length,
+    onlinePlayers: online,
+    totalPlaySeconds,
+    signIns7d,
+    games: [...gameTotals.entries()].map(([game, seconds]) => ({ game, seconds })).sort((a, b) => b.seconds - a.seconds).slice(0, 12),
+    daily,
+  };
 });
 
 export const saveSettings = createServerFn({ method: "POST" })
@@ -374,6 +443,9 @@ export const saveSettings = createServerFn({ method: "POST" })
       lockdown: data.lockdown ?? cur.lockdown,
       hidden_games: data.hidden_games ?? cur.hidden_games,
       kick_all_at: data.kickAll || data.lockdown === true ? new Date().toISOString() : cur.kick_all_at,
+      emergency_level: cur.emergency_level,
+      emergency_notice: cur.emergency_notice,
+      emergency_updated_at: cur.emergency_updated_at,
     };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("site_settings").upsert(next);
