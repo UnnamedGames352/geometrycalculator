@@ -362,7 +362,7 @@ export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
   const { getGateSession, isAdmin } = await import("./gate.server");
   if (!(await isAdmin())) return { admin: false as const, codes: [] as string[] };
   const session = await getGateSession();
-  if ((ROLE_LEVEL[session.data.adminRole ?? "owner"] ?? 0) < ROLE_LEVEL.admin) return { admin: true as const, codes: [] as string[] };
+  if ((ROLE_LEVEL[session.data.adminRole ?? "owner"] ?? 0) < (ROLE_LEVEL["admin"] ?? 0)) return { admin: true as const, codes: [] as string[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("access_codes").select("code").order("created_at", { ascending: false });
   return { admin: true as const, codes: (data ?? []).map((r) => r.code) };
