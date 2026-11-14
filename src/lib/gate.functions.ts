@@ -108,24 +108,136 @@ export const adminLogin = createServerFn({ method: "POST" })
     if (await isDeviceBanned(data.deviceId)) { await logActivity("blocked", "Banned device attempted admin login",data.deviceId,data.password); return { ok: false as const }; }
     const expected = process.env["SITE_PASSWORD"];
     if (!expected || !passwordMatches(data.password,expected)) { await failedAttempt("admin_wrong",data.password,data.deviceId); return { ok: false as const }; }
-    const s = await getGateSession();
-    await s.update({ unlocked: true, admin: true, deviceId: data.deviceId, at: Date.now(), friendId: undefined, token: undefined });
-    await logActivity("admin_login", "Admin signed in",data.deviceId);
+    const session = await getGateSession();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: security, error } = await supabaseAdmin.from("admin_security").select("totp_enabled").eq("id", 1).maybeSingle();
+    if (error) throw new Error("Could not check administrator security settings");
+    await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: true, pendingTotpSecret: undefined, deviceId: data.deviceId, at: Date.now() });
+    await logActivity("admin_password_verified", "Admin password verified; second factor required", data.deviceId);
+    return security?.totp_enabled ? { ok: false as const, requiresTwoFactor: true as const } : { ok: false as const, requiresSetup: true as const };
+  });
+
+export const beginAdminTwoFactorSetup = createServerFn({ method: "POST" }).handler(async () => {
+  const { getGateSession } = await import("./gate.server");
+  const session = await getGateSession();
+  if (!session.data.pendingAdminAuth || !session.data.deviceId) throw new Error("Verify the admin password first.");
+  const { generateTotpSecret, buildTotpUri } = await import("./admin-security");
+  const secret = generateTotpSecret();
+  await session.update({ ...session.data, pendingTotpSecret: secret });
+  return { secret, uri: buildTotpUri(secret) };
+});
+
+export const confirmAdminTwoFactorSetup = createServerFn({ method: "POST" })
+  .inputValidator((d: { code: string }) => z.object({ code: z.string().regex(/^\\d{6}$/) }).parse(d))
+  .handler(async ({ data }) => {
+    const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
+    const session = await getGateSession();
+    const secret = session.data.pendingTotpSecret;
+    if (!session.data.pendingAdminAuth || !session.data.deviceId || !secret) throw new Error("Start authenticator setup first.");
+    const { verifyTotp, encryptTotpSecret, generateRecoveryCodes, hashRecoveryCode } = await import("./admin-security");
+    if (!verifyTotp(secret, data.code)) return { ok: false as const, error: "That authenticator code is not valid." };
+    const sessionSecret = process.env["SESSION_SECRET"];
+    if (!sessionSecret) throw new Error("Session encryption is unavailable.");
+    const recoveryCodes = generateRecoveryCodes();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("admin_security").upsert({
+      id: 1, totp_secret_ciphertext: encryptTotpSecret(secret, sessionSecret),
+      totp_enabled: true, recovery_code_hashes: recoveryCodes.map(hashRecoveryCode), updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error("Could not save authenticator settings");
+    await startAdminSession(session, session.data.deviceId);
+    await recordAdminAudit("two_factor_enabled", "Authenticator-based two-factor authentication enabled");
+    return { ok: true as const, recoveryCodes };
+  });
+
+export const verifyAdminTwoFactor = createServerFn({ method: "POST" })
+  .inputValidator((d: { code: string }) => z.object({ code: z.string().min(6).max(32) }).parse(d))
+  .handler(async ({ data }) => {
+    const { getGateSession, startAdminSession, recordAdminAudit } = await import("./gate.server");
+    const session = await getGateSession();
+    if (!session.data.pendingAdminAuth || !session.data.deviceId) return { ok: false as const };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: security, error } = await supabaseAdmin.from("admin_security").select("*").eq("id", 1).maybeSingle();
+    if (error || !security?.totp_enabled || !security.totp_secret_ciphertext) return { ok: false as const };
+    const sessionSecret = process.env["SESSION_SECRET"];
+    if (!sessionSecret) throw new Error("Session encryption is unavailable.");
+    const { decryptTotpSecret, verifyTotp, hashRecoveryCode } = await import("./admin-security");
+    let accepted = false;
+    let recoveryHashes = security.recovery_code_hashes ?? [];
+    try { accepted = verifyTotp(decryptTotpSecret(security.totp_secret_ciphertext, sessionSecret), data.code); } catch { accepted = false; }
+    if (!accepted) {
+      const candidate = hashRecoveryCode(data.code);
+      const index = recoveryHashes.indexOf(candidate);
+      if (index >= 0) { recoveryHashes = recoveryHashes.filter((_, i) => i !== index); accepted = true; }
+    }
+    if (!accepted) return { ok: false as const };
+    if (recoveryHashes.length !== (security.recovery_code_hashes ?? []).length) {
+      const { error: updateError } = await supabaseAdmin.from("admin_security").update({ recovery_code_hashes: recoveryHashes, updated_at: new Date().toISOString() }).eq("id", 1);
+      if (updateError) throw new Error("Could not consume recovery code");
+    }
+    await startAdminSession(session, session.data.deviceId);
+    await recordAdminAudit("admin_two_factor_login", "Administrator completed two-factor authentication");
+    return { ok: true as const };
+  });
+
+export const getAdminSecurityOverview = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getGateSession } = await import("./gate.server");
+  const session = await getGateSession();
+  const { createHash } = await import("node:crypto");
+  const hash = session.data.adminSessionToken ? createHash("sha256").update(session.data.adminSessionToken).digest("hex") : "";
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const [{ data: settings, error: settingsError }, { data: sessions, error: sessionsError }, { data: audit, error: auditError }] = await Promise.all([
+    supabaseAdmin.from("admin_security").select("totp_enabled,recovery_code_hashes").eq("id", 1).maybeSingle(),
+    supabaseAdmin.from("admin_sessions").select("id,role,device,ip,created_at,last_seen_at,expires_at,revoked_at,session_token_hash").is("revoked_at", null).order("last_seen_at", { ascending: false }).limit(30),
+    supabaseAdmin.from("admin_audit_log").select("id,actor_role,action,detail,device,ip,created_at").order("created_at", { ascending: false }).limit(40),
+  ]);
+  if (settingsError || sessionsError || auditError) throw new Error("Could not load admin security overview");
+  return {
+    twoFactorEnabled: !!settings?.totp_enabled,
+    remainingRecoveryCodes: settings?.recovery_code_hashes?.length ?? 0,
+    sessions: (sessions ?? []).map(({ session_token_hash, ...row }) => ({ ...row, current: session_token_hash === hash })),
+    audit: audit ?? [],
+  };
+});
+
+export const revokeAdminSession = createServerFn({ method: "POST" })
+  .inputValidator((d: { id: string }) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getGateSession, recordAdminAudit } = await import("./gate.server");
+    const session = await getGateSession();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id).is("revoked_at", null).select("id").maybeSingle();
+    if (error) throw new Error("Could not revoke admin session");
+    if (!row) return { ok: false as const };
+    await recordAdminAudit("admin_session_revoked", `Administrator session ${data.id} revoked`);
+    const { createHash } = await import("node:crypto");
+    if (session.data.adminSessionToken) {
+      const hash = createHash("sha256").update(session.data.adminSessionToken).digest("hex");
+      const { data: current } = await supabaseAdmin.from("admin_sessions").select("id").eq("id", data.id).eq("session_token_hash", hash).maybeSingle();
+      if (current) await session.update({ ...session.data, admin: false, adminSessionToken: undefined, adminRole: undefined });
+    }
     return { ok: true as const };
   });
 
 // Locks the admin page again (used when a new tab opens without having entered the passcode).
 export const lockAdmin = createServerFn({ method: "POST" }).handler(async () => {
-  const { getGateSession } = await import("./gate.server");
+  const { getGateSession, recordAdminAudit } = await import("./gate.server");
   const s = await getGateSession();
-  await s.update({ ...s.data, admin: false });
+  if (s.data.adminSessionToken) {
+    const { createHash } = await import("node:crypto");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const hash = createHash("sha256").update(s.data.adminSessionToken).digest("hex");
+    await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("session_token_hash", hash).is("revoked_at", null);
+    await recordAdminAudit("admin_logout", "Administrator signed out");
+  }
+  await s.update({ ...s.data, admin: false, adminSessionToken: undefined, adminRole: undefined, pendingAdminAuth: false, pendingTotpSecret: undefined });
   return { ok: true };
 });
 
 
 async function requireAdmin() {
-  const { getGateSession } = await import("./gate.server");
-  const s = await getGateSession();
   if (!(await (await import("./gate.server")).isAdmin())) throw new Error("Not Found");
 }
 
