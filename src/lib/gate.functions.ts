@@ -87,8 +87,10 @@ export const kickFriend = createServerFn({ method: "POST" })
 
 // Owner signs in to the secret admin page with SITE_PASSWORD.
 export const checkAdminSession = createServerFn({ method: "GET" }).handler(async () => {
-  const { isAdmin } = await import("./gate.server");
-  return { admin: await isAdmin() };
+  const { isAdmin, getGateSession } = await import("./gate.server");
+  const admin = await isAdmin();
+  const session = await getGateSession();
+  return { admin, role: admin ? session.data.adminRole ?? "owner" : null };
 });
 
 export const adminLogin = createServerFn({ method: "POST" })
