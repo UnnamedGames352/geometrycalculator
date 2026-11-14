@@ -46,11 +46,13 @@ export const redeemCode = createServerFn({ method: "POST" })
 type Friend = { device_id: string | null; id: string; name: string; password: string; online: boolean; last_login: string | null; last_seen: string | null; paused: boolean; expires_at: string | null; device: string | null; ip: string | null; location: string | null; user_agent: string | null; current_game: string | null; game_started_at: string | null; message: string | null; browser_version: string | null; screen: string | null; cpu_cores: number | null; memory_gb: number | null; total_play_seconds: number; play_seconds: Record<string, number>; admin_note: string };
 
 export const listFriends = createServerFn({ method: "GET" }).handler(async () => {
-  const { getGateSession } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) return { friends: [] as Friend[] };
+  const { getGateSession, isAdmin } = await import("./gate.server");
+  if (!(await isAdmin())) return { friends: [] as Friend[] };
+  const session = await getGateSession();
+  const supportView = session.data.adminRole === "support";
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("friend_passwords").select("*").order("created_at", { ascending: false });
-  return { friends: (data ?? []).map((f): Friend => ({ device_id: f.device_id, id: f.id, name: f.name, password: f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: f.ip, location: f.location, user_agent: f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message, browser_version: f.browser_version, screen: f.screen, cpu_cores: f.cpu_cores, memory_gb: f.memory_gb, total_play_seconds: f.total_play_seconds, play_seconds: addPlaytime(f.play_seconds, null, 0), admin_note: f.admin_note })) };
+  return { friends: (data ?? []).map((f): Friend => ({ device_id: f.device_id, id: f.id, name: f.name, password: supportView ? "" : f.password, online: !!f.active_session, last_login: f.last_login, last_seen: f.last_seen, paused: f.paused, expires_at: f.expires_at, device: f.device, ip: supportView ? null : f.ip, location: f.location, user_agent: supportView ? null : f.user_agent, current_game: f.current_game, game_started_at: f.game_started_at, message: f.message, browser_version: supportView ? null : f.browser_version, screen: supportView ? null : f.screen, cpu_cores: supportView ? null : f.cpu_cores, memory_gb: supportView ? null : f.memory_gb, total_play_seconds: f.total_play_seconds, play_seconds: addPlaytime(f.play_seconds, null, 0), admin_note: supportView ? "" : f.admin_note })) };
 });
 
 export const createFriend = createServerFn({ method: "POST" })
@@ -353,8 +355,10 @@ async function requireAdmin(action = "admin_action", minimumRole: "support" | "m
 }
 
 export const listCodes = createServerFn({ method: "GET" }).handler(async () => {
-  const { getGateSession } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) return { admin: false as const, codes: [] as string[] };
+  const { getGateSession, isAdmin } = await import("./gate.server");
+  if (!(await isAdmin())) return { admin: false as const, codes: [] as string[] };
+  const session = await getGateSession();
+  if ((ROLE_LEVEL[session.data.adminRole ?? "owner"] ?? 0) < ROLE_LEVEL.admin) return { admin: true as const, codes: [] as string[] };
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("access_codes").select("code").order("created_at", { ascending: false });
   return { admin: true as const, codes: (data ?? []).map((r) => r.code) };
@@ -423,11 +427,13 @@ export const updateFriend = createServerFn({ method: "POST" })
   });
 
 export const getActivity = createServerFn({ method: "GET" }).handler(async () => {
-  const { getGateSession, getSettings } = await import("./gate.server");
-  if (!(await (await import("./gate.server")).isAdmin())) return { log: [], settings: { lockdown: false, lockdown_level: 1, hidden_games: [] as string[], kick_all_at: null as string | null, broadcast_message: null as string | null } };
+  const { getGateSession, getSettings, isAdmin } = await import("./gate.server");
+  if (!(await isAdmin())) return { log: [], settings: { lockdown: false, lockdown_level: 1, hidden_games: [] as string[], kick_all_at: null as string | null, broadcast_message: null as string | null } };
+  const session = await getGateSession();
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.from("activity_log").select("id, at, kind, detail, device_id, device, attempted_input").order("at", { ascending: false }).limit(50);
-  return { log: data ?? [], settings: await getSettings() };
+  const log = (data ?? []).map((entry) => session.data.adminRole === "support" ? { ...entry, attempted_input: null, device_id: null } : entry);
+  return { log, settings: await getSettings() };
 });
 
 export const clearActivity = createServerFn({ method: "POST" }).handler(async () => {
