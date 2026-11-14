@@ -48,4 +48,7 @@ $$;
 CREATE TRIGGER admin_audit_log_immutable
 BEFORE UPDATE OR DELETE ON public.admin_audit_log
 FOR EACH ROW EXECUTE FUNCTION public.prevent_admin_audit_mutation();
+CREATE TRIGGER admin_audit_log_no_truncate
+BEFORE TRUNCATE ON public.admin_audit_log
+FOR EACH STATEMENT EXECUTE FUNCTION public.prevent_admin_audit_mutation();
 REVOKE ALL ON FUNCTION public.prevent_admin_audit_mutation() FROM PUBLIC, anon, authenticated;
