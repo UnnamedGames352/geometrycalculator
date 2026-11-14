@@ -71,6 +71,13 @@
       "when": 1794700000000,
       "tag": "0009_admin_security",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0010_reassert_ban_lockdown_trigger",
+      "breakpoints": true
     }
   ]
 }
