@@ -214,12 +214,21 @@ export type Database = {
       }
       site_settings: {
         Row: {
+          emergency_level: number
+          emergency_notice: string
+          emergency_updated_at: string
           hidden_games: string[]
           id: number
           kick_all_at: string | null
           lockdown: boolean
         }
         Insert: {
+          emergency_level?: number
+          emergency_notice?: string
+          emergency_updated_at?: string
+          emergency_level?: number
+          emergency_notice?: string
+          emergency_updated_at?: string
           hidden_games?: string[]
           id?: number
           kick_all_at?: string | null
