@@ -19,6 +19,7 @@ type GateSession = {
   pendingAdminAt?: number | undefined;
   pendingAdminAttempts?: number | undefined;
   pendingTotpSecret?: string | undefined;
+  pendingStaffId?: string | undefined;
 };
 
 const config = () => {
@@ -159,7 +160,7 @@ export async function failedAdminSecondFactor(session: Awaited<ReturnType<typeof
   return locked;
 }
 
-export async function startAdminSession(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string) {
+export async function startAdminSession(session: Awaited<ReturnType<typeof getGateSession>>, deviceId: string, role: GateSession["adminRole"] = "owner", staffId?: string) {
   const { randomUUID } = await import("node:crypto");
   const token = randomUUID();
   const hash = createHash("sha256").update(token).digest("hex");
@@ -167,13 +168,13 @@ export async function startAdminSession(session: Awaited<ReturnType<typeof getGa
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
   const { error } = await supabaseAdmin.from("admin_sessions").insert({
-    session_token_hash: hash, role: "owner", device_id: deviceId,
+    session_token_hash: hash, role: role ?? "owner", staff_id: staffId ?? null, device_id: deviceId,
     device: info.device, ip: info.ip, expires_at: expiresAt,
   });
   if (error) throw new Error("Could not create admin session");
   await session.update({
     ...session.data, unlocked: true, admin: true, adminSessionToken: token,
-    adminRole: "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined,
+    adminRole: role ?? "owner", pendingAdminAuth: false, pendingAdminAt: undefined, pendingAdminAttempts: undefined, pendingTotpSecret: undefined, pendingStaffId: undefined,
     deviceId, at: Date.now(), friendId: undefined, token: undefined,
     tripwireNotice: false, tripwireNoticeShown: true,
   });
@@ -213,13 +214,18 @@ export async function isAdmin() {
   // Owner access is protected by the admin password and TOTP, not the player Chromebook gate.
   // Device bans and the Chromebook tripwire apply to player sessions only.
   const { data, error } = await supabaseAdmin.from("admin_sessions")
-    .select("id,role,expires_at,revoked_at,last_seen_at")
+    .select("id,role,staff_id,expires_at,revoked_at,last_seen_at")
     .eq("session_token_hash", hash).maybeSingle();
   if (error) throw new Error("Could not validate admin session");
   if (!data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) {
     if (data && !data.revoked_at) await supabaseAdmin.from("admin_sessions").update({ revoked_at: new Date().toISOString() }).eq("id", data.id);
     await s.update({ ...s.data, unlocked: false, admin: false, adminSessionToken: undefined, adminRole: undefined, friendId: undefined, token: undefined });
     return false;
+  }
+  if (data.staff_id) {
+    const { data: staff, error: staffError } = await supabaseAdmin.from("admin_staff").select("disabled").eq("id", data.staff_id).maybeSingle();
+    if (staffError) throw new Error("Could not validate staff account");
+    if (!staff || staff.disabled) { await invalidateSession(); return false; }
   }
   if (s.data.adminRole !== data.role) await s.update({ ...s.data, adminRole: data.role as GateSession["adminRole"] });
   if (Date.now() - Date.parse(data.last_seen_at) > 60_000) {
