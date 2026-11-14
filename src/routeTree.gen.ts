@@ -74,10 +74,10 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/
+  fullPaths: '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/
-  id: '__root__' | '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/
+  to: '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/$'
+  id: '__root__' | '/' | '/admin' | '/appeal' | '/geometry' | '/hub' | '/play/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
