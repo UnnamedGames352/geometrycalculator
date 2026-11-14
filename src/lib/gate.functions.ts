@@ -384,7 +384,7 @@ export const setEmergencyProtocol = createServerFn({ method: "POST" })
       emergency_updated_at: now,
     });
     if (error) throw new Error("Could not update emergency protocol.");
-    if (level >= 3) await evictUsers(true);
+    if (level === 4) await evictUsers(true);
     await logActivity("emergency_protocol", `Emergency protocol changed from level ${current.emergency_level} to level ${level}`);
     return { ok: true as const, lockdown };
   });
