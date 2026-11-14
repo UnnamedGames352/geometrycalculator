@@ -484,7 +484,7 @@ function AdminGate() {
         setUri(setup.uri);
         setStage("setup");
       } else if ("requiresTwoFactor" in result && result.requiresTwoFactor) setStage("verify");
-      else toast.error("Admin sign-in failed.");
+      else await router.navigate({ to: "/geometry" });
     } catch { toast.error("Admin sign-in failed."); }
     finally { setBusy(false); }
   }
